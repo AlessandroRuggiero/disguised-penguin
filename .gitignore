@@ -1,0 +1,13 @@
+.idea/
+.vscode/
+
+# Binaries
+bin/
+disguised-penguin
+
+# Test files
+*.test
+
+# Go workspace
+go.work
+go.work.sum
