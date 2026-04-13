@@ -76,10 +76,12 @@ func getCliByName(name string) (*CLI, error) {
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "disguised-penguin [cli_name]",
+	Use:   "disguised-penguin [cli_name] [args...]",
 	Short: "Run CLI applications in a containerized environment",
 	Long:  ``,
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.MinimumNArgs(1),
+	// Allow unknown flags to pass through to the target CLI
+	DisableFlagParsing: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cliName := args[0]
 		cli, err := getCliByName(cliName)
@@ -94,7 +96,9 @@ var rootCmd = &cobra.Command{
 
 		// fmt.Printf("Running CLI '%s' in container '%s' in the current directory '%s'\n", cli.Name, cli.ContainerName, cwd)
 
-		dockerCmd := exec.Command("docker", "run", "--rm", "-it", "-v", fmt.Sprintf("%s:/workspace", cwd), "-w", "/workspace", cli.ContainerName)
+		dockerArgs := []string{"run", "--rm", "-it", "-v", fmt.Sprintf("%s:/workspace", cwd), "-w", "/workspace", cli.ContainerName}
+		dockerArgs = append(dockerArgs, args[1:]...)
+		dockerCmd := exec.Command("docker", dockerArgs...)
 		dockerCmd.Stdin = os.Stdin
 		dockerCmd.Stdout = os.Stdout
 		dockerCmd.Stderr = os.Stderr
