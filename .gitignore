@@ -3,7 +3,6 @@
 
 # Binaries
 bin/
-disguised-penguin
 
 # Test files
 *.test
