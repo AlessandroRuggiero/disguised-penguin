@@ -21,10 +21,14 @@ type CLI struct {
 	ID            int
 	Name          string
 	ContainerName string
+	ConfigMounts  map[string]string
+	PortMappings  map[string]string
 }
 
 type RemotePackage struct {
-	Container string `json:"container"`
+	Container    string            `json:"container"`
+	ConfigMounts map[string]string `json:"configmounts,omitempty"`
+	PortMappings map[string]string `json:"portmappings,omitempty"`
 }
 
 func getRemotePackages() (map[string]RemotePackage, error) {
@@ -68,9 +72,17 @@ func GetDBPath() (string, error) {
 
 func getCliByName(name string) (*CLI, error) {
 	var cli CLI
-	err := db.QueryRow(`SELECT id, name, container_name FROM clis WHERE name = ?`, name).Scan(&cli.ID, &cli.Name, &cli.ContainerName)
+	var configMountsStr string
+	var portMappingsStr string
+	err := db.QueryRow(`SELECT id, name, container_name, config_mounts, port_mappings FROM clis WHERE name = ?`, name).Scan(&cli.ID, &cli.Name, &cli.ContainerName, &configMountsStr, &portMappingsStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query CLI: %w", err)
+	}
+	if err := json.Unmarshal([]byte(configMountsStr), &cli.ConfigMounts); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal config mounts: %w", err)
+	}
+	if err := json.Unmarshal([]byte(portMappingsStr), &cli.PortMappings); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal port mappings: %w", err)
 	}
 	return &cli, nil
 }
@@ -96,7 +108,17 @@ var rootCmd = &cobra.Command{
 
 		// fmt.Printf("Running CLI '%s' in container '%s' in the current directory '%s'\n", cli.Name, cli.ContainerName, cwd)
 
-		dockerArgs := []string{"run", "--rm", "-it", "-v", fmt.Sprintf("%s:/workspace", cwd), "-w", "/workspace", cli.ContainerName}
+		dockerArgs := []string{"run", "--rm", "-it", "-v", fmt.Sprintf("%s:/workspace", cwd), "-w", "/workspace"}
+		for volumeName, containerPath := range cli.ConfigMounts {
+			configVolume := fmt.Sprintf("%s___%s", cli.Name, volumeName)
+			dockerArgs = append(dockerArgs, "-v", fmt.Sprintf("%s:%s", configVolume, containerPath))
+		}
+
+		for hostPort, containerPort := range cli.PortMappings {
+			dockerArgs = append(dockerArgs, "-p", fmt.Sprintf("%s:%s", hostPort, containerPort))
+		}
+
+		dockerArgs = append(dockerArgs, cli.ContainerName)
 		dockerArgs = append(dockerArgs, args[1:]...)
 		dockerCmd := exec.Command("docker", dockerArgs...)
 		dockerCmd.Stdin = os.Stdin
@@ -118,8 +140,7 @@ var addCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		containerName := args[1]
-
-		_, err := db.Exec(`INSERT INTO clis (name, container_name) VALUES (?, ?)`, name, containerName)
+		_, err := db.Exec(`INSERT INTO clis (name, container_name, config_mounts, port_mappings) VALUES (?, ?, ?, ?)`, name, containerName, "{}", "{}")
 		if err != nil {
 			return fmt.Errorf("failed to insert CLI into db: %w", err)
 		}
@@ -180,7 +201,17 @@ var installCmd = &cobra.Command{
 		fmt.Printf("Successfully pulled Docker image '%s'\n", pkgToInstall.Container)
 
 		// Add to local database
-		_, err = db.Exec(`INSERT INTO clis (name, container_name) VALUES (?, ?)`, name, pkgToInstall.Container)
+		configMountsBytes, err := json.Marshal(pkgToInstall.ConfigMounts)
+		fmt.Println("Config mounts:", pkgToInstall.ConfigMounts)
+		if err != nil {
+			return fmt.Errorf("failed to marshal config mounts: %w", err)
+		}
+		portMappingsBytes, err := json.Marshal(pkgToInstall.PortMappings)
+		fmt.Println("Port mappings:", pkgToInstall.PortMappings)
+		if err != nil {
+			return fmt.Errorf("failed to marshal port mappings: %w", err)
+		}
+		_, err = db.Exec(`INSERT INTO clis (name, container_name, config_mounts, port_mappings) VALUES (?, ?, ?, ?)`, name, pkgToInstall.Container, string(configMountsBytes), string(portMappingsBytes))
 		if err != nil {
 			return fmt.Errorf("failed to insert CLI into db: %w", err)
 		}
@@ -213,7 +244,9 @@ func main() {
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS clis (
 		id INTEGER PRIMARY KEY AUTOINCREMENT, 
 		name TEXT UNIQUE, 
-		container_name TEXT
+		container_name TEXT,
+		config_mounts TEXT,
+		port_mappings TEXT
 	)`)
 	if err != nil {
 		fmt.Printf("Failed to create table: %v\n", err)
