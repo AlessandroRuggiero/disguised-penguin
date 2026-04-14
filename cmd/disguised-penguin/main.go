@@ -75,6 +75,10 @@ func getCliByName(name string) (*CLI, error) {
 	var configMountsStr string
 	var portMappingsStr string
 	err := db.QueryRow(`SELECT id, name, container_name, config_mounts, port_mappings FROM clis WHERE name = ?`, name).Scan(&cli.ID, &cli.Name, &cli.ContainerName, &configMountsStr, &portMappingsStr)
+	// if the error is sql.ErrNoRows, it means the CLI was not found in the database, so we return a more user-friendly error message
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("CLI '%s' not found in database.\nSuggestion: Use 'dp list' to see available CLIs or 'dp install %s' to install it from the remote repository", name, name)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to query CLI: %w", err)
 	}
@@ -88,7 +92,7 @@ func getCliByName(name string) (*CLI, error) {
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "disguised-penguin [cli_name] [args...]",
+	Use:   "dp  [cli_name] [args...]",
 	Short: "Run CLI applications in a containerized environment",
 	Long:  ``,
 	Args:  cobra.MinimumNArgs(1),
@@ -248,10 +252,33 @@ var eraseDBCmd = &cobra.Command{
 	},
 }
 
+var listCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List all available CLIs in the database",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		rows, err := db.Query(`SELECT name, container_name FROM clis`)
+		if err != nil {
+			return fmt.Errorf("failed to query CLIs: %w", err)
+		}
+		defer rows.Close()
+
+		fmt.Println("Available CLIs:")
+		for rows.Next() {
+			var name, containerName string
+			if err := rows.Scan(&name, &containerName); err != nil {
+				return fmt.Errorf("failed to scan row: %w", err)
+			}
+			fmt.Printf("- %s (container: %s)\n", name, containerName)
+		}
+		return nil
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(addCmd)
 	rootCmd.AddCommand(rmCmd)
 	rootCmd.AddCommand(installCmd)
+	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(eraseDBCmd)
 }
 
