@@ -123,9 +123,22 @@ var rootCmd = &cobra.Command{
 			fmt.Printf("Warning: Could not get current user info: %v. Container may run as root.\n", err)
 		}
 
+		// Get the app's base data directory for volumes
+		appDataDir, err := GetDBPath()
+		if err != nil {
+			return fmt.Errorf("failed to get app data dir: %w", err)
+		}
+		volumesDir := filepath.Join(filepath.Dir(appDataDir), "volumes", cli.Name)
+
 		for volumeName, containerPath := range cli.ConfigMounts {
-			configVolume := fmt.Sprintf("%s___%s", cli.Name, volumeName)
-			dockerArgs = append(dockerArgs, "-v", fmt.Sprintf("%s:%s", configVolume, containerPath))
+			// Create a physical directory on the host for this volume
+			hostVolumePath := filepath.Join(volumesDir, volumeName)
+			if err := os.MkdirAll(hostVolumePath, 0755); err != nil {
+				return fmt.Errorf("failed to create host volume directory: %w", err)
+			}
+
+			// Bind mount the physical host directory (which we now own) into the container
+			dockerArgs = append(dockerArgs, "-v", fmt.Sprintf("%s:%s", hostVolumePath, containerPath))
 		}
 
 		for hostPort, containerPort := range cli.PortMappings {
