@@ -37,12 +37,12 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v4
         with:
-          name: disguised-penguin
-          path: bin/disguised-penguin
+          name: dp
+          path: bin/dp
 
       - name: Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: bin/disguised-penguin
+          files: bin/dp
           generate_release_notes: true

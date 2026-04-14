@@ -1,6 +1,6 @@
 .PHONY: all build run test clean
 
-APP_NAME=disguised-penguin
+APP_NAME=dp
 BIN_DIR=bin
 CMD_DIR=cmd/disguised-penguin
 

@@ -220,10 +220,39 @@ var installCmd = &cobra.Command{
 	},
 }
 
+var eraseDBCmd = &cobra.Command{
+	Use:   "erase-db",
+	Short: "Erase the entire CLI database (use with caution)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// make the user confirm before erasing the database
+		fmt.Print("Are you sure you want to erase the entire CLI database? This action cannot be undone. (y/N): ")
+		var response string
+		fmt.Scanln(&response)
+		if response != "y" && response != "Y" {
+			fmt.Println("Aborting database erase.")
+			return nil
+		}
+
+		// close the current DB connection before deleting the file
+		db.Close()
+
+		dbPath, err := GetDBPath()
+		if err != nil {
+			return fmt.Errorf("could not get DB path: %w", err)
+		}
+		if err := os.Remove(dbPath); err != nil {
+			return fmt.Errorf("failed to erase database: %w", err)
+		}
+		fmt.Println("Successfully erased the CLI database.")
+		return nil
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(addCmd)
 	rootCmd.AddCommand(rmCmd)
 	rootCmd.AddCommand(installCmd)
+	rootCmd.AddCommand(eraseDBCmd)
 }
 
 func main() {
