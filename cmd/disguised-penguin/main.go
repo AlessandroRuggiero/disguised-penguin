@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
@@ -113,6 +114,15 @@ var rootCmd = &cobra.Command{
 		// fmt.Printf("Running CLI '%s' in container '%s' in the current directory '%s'\n", cli.Name, cli.ContainerName, cwd)
 
 		dockerArgs := []string{"run", "--rm", "-it", "-v", fmt.Sprintf("%s:/workspace", cwd), "-w", "/workspace"}
+
+		// Pass host UID and GID so the container's entrypoint can map the internal user
+		if currentUser, err := user.Current(); err == nil {
+			dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("PUID=%s", currentUser.Uid))
+			dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("PGID=%s", currentUser.Gid))
+		} else {
+			fmt.Printf("Warning: Could not get current user info: %v. Container may run as root.\n", err)
+		}
+
 		for volumeName, containerPath := range cli.ConfigMounts {
 			configVolume := fmt.Sprintf("%s___%s", cli.Name, volumeName)
 			dockerArgs = append(dockerArgs, "-v", fmt.Sprintf("%s:%s", configVolume, containerPath))
