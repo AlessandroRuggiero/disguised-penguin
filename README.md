@@ -72,3 +72,7 @@ Disguised Penguin maintains a local SQLite database (`~/.local/share/disguised-p
 
 - Go 1.25+
 - Docker
+
+## License
+
+This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
