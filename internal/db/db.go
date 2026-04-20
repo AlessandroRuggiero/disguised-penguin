@@ -14,7 +14,7 @@ import (
 )
 
 var defaultRegistry models.RemoteRegistry = models.RemoteRegistry{
-	Uri:          "https://raw.githubusercontent.com/AlessandroRuggiero/disguised-penguin-repo/main",
+	URI:          "https://raw.githubusercontent.com/AlessandroRuggiero/disguised-penguin-repo/main",
 	RegistryType: models.RegistryTypeGitHub,
 }
 
@@ -76,14 +76,14 @@ port_mappings TEXT
 CREATE TABLE IF NOT EXISTS registries (
 id INTEGER PRIMARY KEY AUTOINCREMENT, 
 uri TEXT UNIQUE,
-registry_type TEXT
+registry_type TEXT,
 priority INTEGER DEFAULT 0
 );
 
-IF NOT EXISTS (SELECT 1 FROM registries) THEN
-INSERT INTO registries (uri, registry_type) VALUES (?, ?);
-END IF;
-`, defaultRegistry.Uri, defaultRegistry.RegistryType)
+INSERT INTO registries (uri, registry_type)
+SELECT ?, ?
+WHERE NOT EXISTS (SELECT 1 FROM registries);
+`, defaultRegistry.URI, defaultRegistry.RegistryType)
 	return err
 }
 
@@ -170,7 +170,7 @@ func (s *Store) ListRegistries() ([]models.RemoteRegistry, error) {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 		registryType := models.RegistryType(registryTypeStr)
-		registries = append(registries, models.RemoteRegistry{Uri: uri, RegistryType: registryType})
+		registries = append(registries, models.RemoteRegistry{URI: uri, RegistryType: registryType})
 	}
 	return registries, nil
 }
@@ -182,9 +182,9 @@ func (s *Store) SearchRemotePackageByName(name string) (*models.RemotePackage, b
 	}
 
 	for _, registry := range registries {
-		pkgs, err := remote.GetRemotePackages(registry.Uri)
+		pkgs, err := remote.GetRemotePackages(registry.URI)
 		if err != nil {
-			fmt.Printf("Warning: Failed to fetch packages from registry %s: %v\n", registry.Uri, err)
+			fmt.Printf("Warning: Failed to fetch packages from registry %s: %v\n", registry.URI, err)
 			continue
 		}
 		if pkg, exists := pkgs[name]; exists {

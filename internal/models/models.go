@@ -21,6 +21,6 @@ type RemotePackage struct {
 }
 
 type RemoteRegistry struct {
-	Uri          string
+	URI          string
 	RegistryType RegistryType
 }
