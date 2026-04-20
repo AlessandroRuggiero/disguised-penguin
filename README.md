@@ -60,6 +60,42 @@ dp add <name> <container-image>
 dp rm <name>
 ```
 
+### Update a CLI
+
+```bash
+dp update <name>
+```
+Updates the CLI package locally by pulling the latest mapped container image.
+
+### List installed CLIs
+
+```bash
+dp list
+```
+Shows all local CLI configurations and mapped containers.
+
+### Manage Remote Registries
+
+Add, list, or remove registries where `dp` searches for packages to install.
+
+```bash
+# Add a remote registry
+dp registry add <uri> <type> [priority]
+
+# List remote registries
+dp registry list
+
+# Remove a remote registry
+dp registry rm <uri>
+```
+
+### Database Management
+
+```bash
+# Danger: Erases the entire CLI database
+dp erase-db
+```
+
 ## How It Works
 
 Disguised Penguin maintains a local SQLite database (`~/.local/share/disguised-penguin/data.db`) storing CLI configurations. When you run a CLI, it spawns a Docker container with:
