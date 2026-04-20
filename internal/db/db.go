@@ -16,6 +16,7 @@ import (
 var defaultRegistry models.RemoteRegistry = models.RemoteRegistry{
 	URI:          "https://raw.githubusercontent.com/AlessandroRuggiero/disguised-penguin-repo/main",
 	RegistryType: models.RegistryTypeGitHub,
+	Priority:     0,
 }
 
 type Store struct {
@@ -80,10 +81,10 @@ registry_type TEXT,
 priority INTEGER DEFAULT 0
 );
 
-INSERT INTO registries (uri, registry_type)
-SELECT ?, ?
+INSERT INTO registries (uri, registry_type, priority)
+SELECT ?, ?, ?
 WHERE NOT EXISTS (SELECT 1 FROM registries);
-`, defaultRegistry.URI, defaultRegistry.RegistryType)
+`, defaultRegistry.URI, defaultRegistry.RegistryType, defaultRegistry.Priority)
 	return err
 }
 
@@ -157,7 +158,7 @@ func (s *Store) ListCLIs() ([]models.CLI, error) {
 }
 
 func (s *Store) ListRegistries() ([]models.RemoteRegistry, error) {
-	rows, err := s.db.Query(`SELECT uri, registry_type FROM registries ORDER BY priority DESC`)
+	rows, err := s.db.Query(`SELECT uri, registry_type, priority FROM registries ORDER BY priority DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query registries: %w", err)
 	}
@@ -166,11 +167,12 @@ func (s *Store) ListRegistries() ([]models.RemoteRegistry, error) {
 	var registries []models.RemoteRegistry
 	for rows.Next() {
 		var uri, registryTypeStr string
-		if err := rows.Scan(&uri, &registryTypeStr); err != nil {
+		var priority int
+		if err := rows.Scan(&uri, &registryTypeStr, &priority); err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 		registryType := models.RegistryType(registryTypeStr)
-		registries = append(registries, models.RemoteRegistry{URI: uri, RegistryType: registryType})
+		registries = append(registries, models.RemoteRegistry{URI: uri, RegistryType: registryType, Priority: priority})
 	}
 	return registries, nil
 }
@@ -192,4 +194,30 @@ func (s *Store) SearchRemotePackageByName(name string) (*models.RemotePackage, b
 		}
 	}
 	return nil, false, fmt.Errorf("package '%s' not found in any remote registry", name)
+}
+
+func (s *Store) RemoveRegistry(uri string) (int64, error) {
+	result, err := s.db.Exec(`DELETE FROM registries WHERE uri = ?`, uri)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+func (s *Store) AddRegistry(uri string, registryType models.RegistryType, priority int) error {
+	_, err := s.db.Exec(`INSERT INTO registries (uri, registry_type, priority) VALUES (?, ?, ?)`, uri, string(registryType), priority)
+	return err
+}
+
+func (s *Store) UpdateCLI(name string, pkg *models.RemotePackage) error {
+	configMountsBytes, err := json.Marshal(pkg.ConfigMounts)
+	if err != nil {
+		return fmt.Errorf("failed to marshal config mounts: %w", err)
+	}
+	portMappingsBytes, err := json.Marshal(pkg.PortMappings)
+	if err != nil {
+		return fmt.Errorf("failed to marshal port mappings: %w", err)
+	}
+	_, err = s.db.Exec(`UPDATE clis SET container_name = ?, config_mounts = ?, port_mappings = ? WHERE name = ?`, pkg.Container, string(configMountsBytes), string(portMappingsBytes), name)
+	return err
 }

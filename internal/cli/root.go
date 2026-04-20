@@ -86,5 +86,10 @@ func init() {
 	rootCmd.AddCommand(rmCmd)
 	rootCmd.AddCommand(installCmd)
 	rootCmd.AddCommand(listCmd)
+	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(eraseDBCmd)
+	rootCmd.AddCommand(registryCmd)
+	registryCmd.AddCommand(registryAddCmd)
+	registryCmd.AddCommand(registryListCmd)
+	registryCmd.AddCommand(registryRemoveCmd)
 }

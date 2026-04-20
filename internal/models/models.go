@@ -1,5 +1,7 @@
 package models
 
+import "fmt"
+
 type RegistryType string
 
 const (
@@ -23,4 +25,14 @@ type RemotePackage struct {
 type RemoteRegistry struct {
 	URI          string
 	RegistryType RegistryType
+	Priority     int
+}
+
+func MakeRegistryType(s string) (RegistryType, error) {
+	switch s {
+	case "github":
+		return RegistryTypeGitHub, nil
+	default:
+		return "", fmt.Errorf("invalid registry type: %s", s)
+	}
 }

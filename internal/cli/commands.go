@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"disguised-penguin/internal/models"
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 
 	"github.com/spf13/cobra"
 )
@@ -59,6 +61,11 @@ var installCmd = &cobra.Command{
 			return fmt.Errorf("package '%s' not found in any remote registry", name)
 		}
 
+		// make sure it is not already installed
+		if _, err := store.GetCliByName(name); err == nil {
+			return fmt.Errorf("CLI '%s' is already installed", name)
+		}
+
 		fmt.Printf("Pulling Docker image '%s' for CLI '%s'...\n", pkgToInstall.Container, name)
 		dockerCmd := exec.Command("docker", "pull", pkgToInstall.Container)
 		dockerCmd.Stdout = os.Stdout
@@ -112,6 +119,112 @@ var eraseDBCmd = &cobra.Command{
 			return fmt.Errorf("failed to erase database: %w", err)
 		}
 		fmt.Println("Successfully erased the CLI database.")
+		return nil
+	},
+}
+
+var registryCmd = &cobra.Command{
+	Use:   "registry",
+	Short: "Manage remote registries",
+}
+
+var registryAddCmd = &cobra.Command{
+	Use:     "add [uri] [type] [priority]",
+	Aliases: []string{"a"},
+	Short:   "Add a new remote registry",
+	Args:    cobra.RangeArgs(2, 3),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		uri := args[0]
+		registryType := args[1]
+		priority := 0
+		if len(args) == 3 {
+			var err error
+			priority, err = strconv.Atoi(args[2])
+			if err != nil {
+				return fmt.Errorf("failed to parse priority: %w", err)
+			}
+		}
+		// Validate registry type
+		regType, err := models.MakeRegistryType(registryType)
+		if err != nil {
+			return fmt.Errorf("invalid registry type: %w", err)
+		}
+		if err := store.AddRegistry(uri, regType, priority); err != nil {
+			return fmt.Errorf("failed to add registry: %w", err)
+		}
+		fmt.Printf("Successfully added registry '%s' of type '%s' with priority %d\n", uri, registryType, priority)
+		return nil
+	},
+}
+
+var registryListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List all remote registries",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		registries, err := store.ListRegistries()
+		if err != nil {
+			return fmt.Errorf("failed to list registries: %w", err)
+		}
+		fmt.Println("Remote Registries:")
+		for _, r := range registries {
+			fmt.Printf("- URI: %s, Type: %s, Priority: %d\n", r.URI, r.RegistryType, r.Priority)
+		}
+		return nil
+	},
+}
+
+var registryRemoveCmd = &cobra.Command{
+	Use:     "rm [uri]",
+	Aliases: []string{"remove", "r"},
+	Short:   "Remove a remote registry",
+	Args:    cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		uri := args[0]
+		rowsAffected, err := store.RemoveRegistry(uri)
+		if err != nil {
+			return fmt.Errorf("failed to remove registry: %w", err)
+		}
+		if rowsAffected == 0 {
+			fmt.Printf("No registry found with URI '%s'\n", uri)
+		} else {
+			fmt.Printf("Successfully removed registry '%s'\n", uri)
+		}
+		return nil
+	},
+}
+
+var updateCmd = &cobra.Command{
+	Use:     "update [name]",
+	Aliases: []string{"u"},
+	Short:   "Update a CLI configuration by pulling the latest Docker image",
+	Args:    cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name := args[0]
+		pkgToUpdate, exists, err := store.SearchRemotePackageByName(name)
+		if err != nil {
+			return fmt.Errorf("failed to search remote package: %w", err)
+		}
+		if !exists {
+			return fmt.Errorf("package '%s' not found in any remote registry", name)
+		}
+
+		fmt.Printf("Pulling latest Docker image '%s' for CLI '%s'...\n", pkgToUpdate.Container, name)
+		dockerCmd := exec.Command("docker", "pull", pkgToUpdate.Container)
+		dockerCmd.Stdout = os.Stdout
+		dockerCmd.Stderr = os.Stderr
+
+		if err := dockerCmd.Run(); err != nil {
+			return fmt.Errorf("failed to pull docker image: %w", err)
+		}
+		fmt.Printf("Successfully pulled latest Docker image '%s'\n", pkgToUpdate.Container)
+
+		fmt.Println("Config mounts:", pkgToUpdate.ConfigMounts)
+		fmt.Println("Port mappings:", pkgToUpdate.PortMappings)
+
+		if err := store.UpdateCLI(name, pkgToUpdate); err != nil {
+			return fmt.Errorf("failed to update CLI in db: %w", err)
+		}
+
 		return nil
 	},
 }
