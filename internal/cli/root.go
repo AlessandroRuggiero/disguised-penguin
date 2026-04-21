@@ -24,6 +24,22 @@ var rootCmd = &cobra.Command{
 	Long:               ``,
 	Args:               cobra.MinimumNArgs(1),
 	DisableFlagParsing: true,
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) != 0 {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+
+		clis, err := store.ListCLIs()
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveError
+		}
+
+		var names []string
+		for _, cli := range clis {
+			names = append(names, cli.Name)
+		}
+		return names, cobra.ShellCompDirectiveNoFileComp
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cliName := args[0]
 		cli, err := store.GetCliByName(cliName)
@@ -82,6 +98,7 @@ func Execute() error {
 }
 
 func init() {
+	rootCmd.AddCommand(installCompletionsCmd)
 	rootCmd.AddCommand(addCmd)
 	rootCmd.AddCommand(rmCmd)
 	rootCmd.AddCommand(installCmd)
