@@ -30,6 +30,16 @@ echo "alias dp='$(pwd)/bin/dp'" >> ~/.bashrc
 source ~/.bashrc
 ```
 
+### Enabling Autocompletion
+
+To enable terminal autocompletion for `dp` commands and installed containerized CLI names, run:
+
+```bash
+dp install-completions
+```
+
+This will automatically add the completion script source command to your `~/.bashrc` or `~/.zshrc`. Restart your shell or open a new terminal for it to take effect.
+
 ## Usage
 
 ### Install a CLI from the remote repository
