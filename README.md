@@ -67,7 +67,7 @@ dp add <name> <container-image>
 ### Remove a CLI
 
 ```bash
-dp rm <name>
+dp remove <name>
 ```
 
 ### Update a CLI
@@ -96,7 +96,7 @@ dp registry add <uri> <type> [priority]
 dp registry list
 
 # Remove a remote registry
-dp registry rm <uri>
+dp registry remove <uri>
 ```
 
 ### Database Management

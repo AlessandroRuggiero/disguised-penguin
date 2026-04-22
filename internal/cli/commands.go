@@ -28,11 +28,24 @@ var addCmd = &cobra.Command{
 }
 
 var rmCmd = &cobra.Command{
-	Use:               "remove [name]",
-	Aliases:           []string{"rm", "r"},
-	Short:             "Remove a CLI configuration from the database",
-	Args:              cobra.ExactArgs(1),
-	ValidArgsFunction: cobra.NoFileCompletions,
+	Use:     "remove [name]",
+	Aliases: []string{"rm", "r"},
+	Short:   "Remove a CLI configuration from the database",
+	Args:    cobra.ExactArgs(1),
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) != 0 {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		clis, err := store.ListCLIs()
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveError
+		}
+		var names []string
+		for _, c := range clis {
+			names = append(names, c.Name)
+		}
+		return names, cobra.ShellCompDirectiveNoFileComp
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		rowsAffected, err := store.RemoveCLI(name)
@@ -199,11 +212,24 @@ var registryRemoveCmd = &cobra.Command{
 }
 
 var updateCmd = &cobra.Command{
-	Use:               "update [name]",
-	Aliases:           []string{"u"},
-	Short:             "Update a CLI configuration by pulling the latest Docker image",
-	Args:              cobra.ExactArgs(1),
-	ValidArgsFunction: cobra.NoFileCompletions,
+	Use:     "update [name]",
+	Aliases: []string{"u"},
+	Short:   "Update a CLI configuration by pulling the latest Docker image",
+	Args:    cobra.ExactArgs(1),
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) != 0 {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		clis, err := store.ListCLIs()
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveError
+		}
+		var names []string
+		for _, c := range clis {
+			names = append(names, c.Name)
+		}
+		return names, cobra.ShellCompDirectiveNoFileComp
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		pkgToUpdate, exists, err := store.SearchRemotePackageByName(name)
