@@ -11,10 +11,11 @@ import (
 )
 
 var addCmd = &cobra.Command{
-	Use:     "add [name] [container_name]",
-	Aliases: []string{"a"},
-	Short:   "Add a new CLI configuration to the database",
-	Args:    cobra.ExactArgs(2),
+	Use:               "add [name] [container_name]",
+	Aliases:           []string{"a"},
+	Short:             "Add a new CLI configuration to the database",
+	Args:              cobra.ExactArgs(2),
+	ValidArgsFunction: cobra.NoFileCompletions,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		containerName := args[1]
@@ -27,10 +28,11 @@ var addCmd = &cobra.Command{
 }
 
 var rmCmd = &cobra.Command{
-	Use:     "rm [name]",
-	Aliases: []string{"remove", "r"},
-	Short:   "Remove a CLI configuration from the database",
-	Args:    cobra.ExactArgs(1),
+	Use:               "remove [name]",
+	Aliases:           []string{"rm", "r"},
+	Short:             "Remove a CLI configuration from the database",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: cobra.NoFileCompletions,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		rowsAffected, err := store.RemoveCLI(name)
@@ -47,10 +49,11 @@ var rmCmd = &cobra.Command{
 }
 
 var installCmd = &cobra.Command{
-	Use:     "install [name]",
-	Aliases: []string{"i"},
-	Short:   "Install a CLI configuration by pulling the associated Docker image",
-	Args:    cobra.ExactArgs(1),
+	Use:               "install [name]",
+	Aliases:           []string{"i"},
+	Short:             "Install a CLI configuration by pulling the associated Docker image",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: cobra.NoFileCompletions,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		pkgToInstall, exists, err := store.SearchRemotePackageByName(name)
@@ -129,10 +132,11 @@ var registryCmd = &cobra.Command{
 }
 
 var registryAddCmd = &cobra.Command{
-	Use:     "add [uri] [type] [priority]",
-	Aliases: []string{"a"},
-	Short:   "Add a new remote registry",
-	Args:    cobra.RangeArgs(2, 3),
+	Use:               "add [uri] [type] [priority]",
+	Aliases:           []string{"a"},
+	Short:             "Add a new remote registry",
+	Args:              cobra.RangeArgs(2, 3),
+	ValidArgsFunction: cobra.NoFileCompletions,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		uri := args[0]
 		registryType := args[1]
@@ -174,10 +178,11 @@ var registryListCmd = &cobra.Command{
 }
 
 var registryRemoveCmd = &cobra.Command{
-	Use:     "rm [uri]",
-	Aliases: []string{"remove", "r"},
-	Short:   "Remove a remote registry",
-	Args:    cobra.ExactArgs(1),
+	Use:               "remove [uri]",
+	Aliases:           []string{"rm"},
+	Short:             "Remove a remote registry",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: cobra.NoFileCompletions,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		uri := args[0]
 		rowsAffected, err := store.RemoveRegistry(uri)
@@ -194,10 +199,11 @@ var registryRemoveCmd = &cobra.Command{
 }
 
 var updateCmd = &cobra.Command{
-	Use:     "update [name]",
-	Aliases: []string{"u"},
-	Short:   "Update a CLI configuration by pulling the latest Docker image",
-	Args:    cobra.ExactArgs(1),
+	Use:               "update [name]",
+	Aliases:           []string{"u"},
+	Short:             "Update a CLI configuration by pulling the latest Docker image",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: cobra.NoFileCompletions,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		pkgToUpdate, exists, err := store.SearchRemotePackageByName(name)
