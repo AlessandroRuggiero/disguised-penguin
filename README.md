@@ -90,13 +90,16 @@ Add, list, or remove registries where `dp` searches for packages to install.
 
 ```bash
 # Add a remote registry
-dp registry add <uri> <type> [priority]
+dp registry add <uri> <type> [priority] [name]
 
 # List remote registries
 dp registry list
 
 # Remove a remote registry
 dp registry remove <uri>
+
+# Display the clis in all the registries matching a ragex
+dp registry visit <regex>
 ```
 
 ### Database Management
