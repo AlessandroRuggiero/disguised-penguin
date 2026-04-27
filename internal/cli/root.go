@@ -109,4 +109,5 @@ func init() {
 	registryCmd.AddCommand(registryAddCmd)
 	registryCmd.AddCommand(registryListCmd)
 	registryCmd.AddCommand(registryRemoveCmd)
+	registryCmd.AddCommand(registryVisitCmd)
 }

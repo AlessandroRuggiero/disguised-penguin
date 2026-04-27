@@ -17,6 +17,7 @@ var defaultRegistry models.RemoteRegistry = models.RemoteRegistry{
 	URI:          "https://raw.githubusercontent.com/AlessandroRuggiero/disguised-penguin-repo/main",
 	RegistryType: models.RegistryTypeGitHub,
 	Priority:     0,
+	Name:         "default",
 }
 
 type Store struct {
@@ -78,13 +79,14 @@ CREATE TABLE IF NOT EXISTS registries (
 id INTEGER PRIMARY KEY AUTOINCREMENT, 
 uri TEXT UNIQUE,
 registry_type TEXT,
-priority INTEGER DEFAULT 0
+priority INTEGER DEFAULT 0,
+name TEXT UNIQUE
 );
 
-INSERT INTO registries (uri, registry_type, priority)
-SELECT ?, ?, ?
+INSERT INTO registries (uri, registry_type, priority, name)
+SELECT ?, ?, ?, ?
 WHERE NOT EXISTS (SELECT 1 FROM registries);
-`, defaultRegistry.URI, defaultRegistry.RegistryType, defaultRegistry.Priority)
+`, defaultRegistry.URI, defaultRegistry.RegistryType, defaultRegistry.Priority, defaultRegistry.Name)
 	return err
 }
 
@@ -157,8 +159,9 @@ func (s *Store) ListCLIs() ([]models.CLI, error) {
 	return clis, nil
 }
 
-func (s *Store) ListRegistries() ([]models.RemoteRegistry, error) {
-	rows, err := s.db.Query(`SELECT uri, registry_type, priority FROM registries ORDER BY priority DESC`)
+func (s *Store) GetRegistryByRegex(pattern string) ([]models.RemoteRegistry, error) {
+	// examples: "def*" to match all registries starting with "def", "*hub" to match all registries ending with "hub", "*repo*" to match all registries containing "repo"
+	rows, err := s.db.Query(`SELECT uri, registry_type, priority, name FROM registries WHERE name GLOB ?`, pattern)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query registries: %w", err)
 	}
@@ -166,13 +169,33 @@ func (s *Store) ListRegistries() ([]models.RemoteRegistry, error) {
 
 	var registries []models.RemoteRegistry
 	for rows.Next() {
-		var uri, registryTypeStr string
+		var uri, registryTypeStr, name string
 		var priority int
-		if err := rows.Scan(&uri, &registryTypeStr, &priority); err != nil {
+		if err := rows.Scan(&uri, &registryTypeStr, &priority, &name); err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 		registryType := models.RegistryType(registryTypeStr)
-		registries = append(registries, models.RemoteRegistry{URI: uri, RegistryType: registryType, Priority: priority})
+		registries = append(registries, models.RemoteRegistry{URI: uri, RegistryType: registryType, Priority: priority, Name: name})
+	}
+	return registries, nil
+}
+
+func (s *Store) ListRegistries() ([]models.RemoteRegistry, error) {
+	rows, err := s.db.Query(`SELECT uri, registry_type, priority, name FROM registries ORDER BY priority DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query registries: %w", err)
+	}
+	defer rows.Close()
+
+	var registries []models.RemoteRegistry
+	for rows.Next() {
+		var uri, registryTypeStr, name string
+		var priority int
+		if err := rows.Scan(&uri, &registryTypeStr, &priority, &name); err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+		registryType := models.RegistryType(registryTypeStr)
+		registries = append(registries, models.RemoteRegistry{URI: uri, RegistryType: registryType, Priority: priority, Name: name})
 	}
 	return registries, nil
 }
@@ -184,7 +207,7 @@ func (s *Store) SearchRemotePackageByName(name string) (*models.RemotePackage, b
 	}
 
 	for _, registry := range registries {
-		pkgs, err := remote.GetRemotePackages(registry.URI)
+		pkgs, err := remote.GetRemotePackages(registry)
 		if err != nil {
 			fmt.Printf("Warning: Failed to fetch packages from registry %s: %v\n", registry.URI, err)
 			continue
@@ -204,8 +227,8 @@ func (s *Store) RemoveRegistry(uri string) (int64, error) {
 	return result.RowsAffected()
 }
 
-func (s *Store) AddRegistry(uri string, registryType models.RegistryType, priority int) error {
-	_, err := s.db.Exec(`INSERT INTO registries (uri, registry_type, priority) VALUES (?, ?, ?)`, uri, string(registryType), priority)
+func (s *Store) AddRegistry(uri string, registryType models.RegistryType, priority int, name string) error {
+	_, err := s.db.Exec(`INSERT INTO registries (uri, registry_type, priority, name) VALUES (?, ?, ?, ?)`, uri, string(registryType), priority, name)
 	return err
 }
 

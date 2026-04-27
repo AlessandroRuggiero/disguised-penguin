@@ -26,6 +26,12 @@ type RemoteRegistry struct {
 	URI          string
 	RegistryType RegistryType
 	Priority     int
+	Name         string
+}
+
+type RemotePackageInfo struct {
+	DefaultName string  `json:"default_name"`
+	Description *string `json:"description"`
 }
 
 func MakeRegistryType(s string) (RegistryType, error) {

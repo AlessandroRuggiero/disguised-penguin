@@ -6,6 +6,8 @@ Run CLI applications in secure, isolated Docker containers without cluttering yo
 - **AI CLI Agents (like `opencode`)**: Run AI assistants safely. They get full access to your current project workspace, but are physically blocked from reading your personal `~/.ssh` keys or browsing your private system files.
 - **Node.js/NPM Packages (like `firebase`)**: Run tools like `firebase deploy` without polluting your host machine. Global npm packages and their sprawling dependency trees are frequently targets for supply chain attacks; running them through `dp` ensures any malicious scripts remain strictly isolated from your system.
 
+To see practical usage examples, check out the [Usage Examples](#usage-examples) section below.
+
 ## Installation
 
 Download the latest `dp` binary from the [GitHub Releases](https://github.com/AlessandroRuggiero/disguised-penguin/releases) page and place it in your PATH (e.g., `/usr/local/bin/dp`).
@@ -61,6 +63,7 @@ Your current working directory is mounted as `/workspace` inside the container.
 ### Add a CLI manually
 
 ```bash
+# This is not recommended for most users, use install instead to pull from a registry
 dp add <name> <container-image>
 ```
 
@@ -90,13 +93,16 @@ Add, list, or remove registries where `dp` searches for packages to install.
 
 ```bash
 # Add a remote registry
-dp registry add <uri> <type> [priority]
+dp registry add <uri> <type> [priority] [name]
 
 # List remote registries
 dp registry list
 
 # Remove a remote registry
 dp registry remove <uri>
+
+# Display the CLIs in one or more registries matching a glob pattern
+dp registry visit [glob]
 ```
 
 ### Database Management
@@ -104,6 +110,28 @@ dp registry remove <uri>
 ```bash
 # Danger: Erases the entire CLI database
 dp erase-db
+```
+
+## Usage Examples
+
+```bash
+# Install the 'opencode' AI CLI agent from the default registry
+dp install opencode
+# Run the 'opencode' CLI in a container
+dp opencode
+# Install the 'firebase' CLI tool
+dp install firebase
+# Run 'firebase deploy' in a container, with your current directory mounted as /workspace
+dp firebase deploy
+
+# Add a github registry and install a package from it
+dp registry add https://raw.githubusercontent.com/YourUsername/YourRepo/main github
+# Then you can install packages from that registry
+dp install your-package-from-github
+# List all registries and their packages
+dp registry list
+# Visit the newly added registry and see its packages
+dp registry visit new-registry-name
 ```
 
 ## How It Works

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"disguised-penguin/internal/models"
+	"disguised-penguin/internal/remote"
 	"fmt"
 	"os"
 	"os/exec"
@@ -145,28 +146,54 @@ var registryCmd = &cobra.Command{
 }
 
 var registryAddCmd = &cobra.Command{
-	Use:               "add [uri] [type] [priority]",
+	Use:               "add [uri] [type] [priority] [name]",
 	Aliases:           []string{"a"},
 	Short:             "Add a new remote registry",
-	Args:              cobra.RangeArgs(2, 3),
+	Args:              cobra.RangeArgs(2, 4),
 	ValidArgsFunction: cobra.NoFileCompletions,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		uri := args[0]
 		registryType := args[1]
 		priority := 0
-		if len(args) == 3 {
+		name := ""
+		if len(args) >= 3 {
 			var err error
 			priority, err = strconv.Atoi(args[2])
 			if err != nil {
 				return fmt.Errorf("failed to parse priority: %w", err)
 			}
 		}
+		if len(args) == 4 {
+			name = args[3]
+		}
 		// Validate registry type
 		regType, err := models.MakeRegistryType(registryType)
 		if err != nil {
 			return fmt.Errorf("invalid registry type: %w", err)
 		}
-		if err := store.AddRegistry(uri, regType, priority); err != nil {
+
+		// Check if registry with the same URI already exists
+		registries, err := store.ListRegistries()
+		if err != nil {
+			return fmt.Errorf("failed to list registries: %w", err)
+		}
+		for _, r := range registries {
+			if r.URI == uri {
+				return fmt.Errorf("a registry with URI '%s' already exists", uri)
+			}
+		}
+
+		// get registry info to validate it is reachable and working
+		info, err := remote.GetRemoteInfo(models.RemoteRegistry{URI: uri, RegistryType: regType})
+		if err != nil {
+			return fmt.Errorf("failed to fetch registry info: %w", err)
+		}
+
+		if name == "" {
+			name = info.DefaultName
+		}
+
+		if err := store.AddRegistry(uri, regType, priority, name); err != nil {
 			return fmt.Errorf("failed to add registry: %w", err)
 		}
 		fmt.Printf("Successfully added registry '%s' of type '%s' with priority %d\n", uri, registryType, priority)
@@ -184,7 +211,7 @@ var registryListCmd = &cobra.Command{
 		}
 		fmt.Println("Remote Registries:")
 		for _, r := range registries {
-			fmt.Printf("- URI: %s, Type: %s, Priority: %d\n", r.URI, r.RegistryType, r.Priority)
+			fmt.Printf("- Name: \033[1m%s\033[0m, Type: %s, Priority: %d, URI: %s\n", r.Name, r.RegistryType, r.Priority, r.URI)
 		}
 		return nil
 	},
@@ -257,6 +284,44 @@ var updateCmd = &cobra.Command{
 			return fmt.Errorf("failed to update CLI in db: %w", err)
 		}
 
+		return nil
+	},
+}
+
+var registryVisitCmd = &cobra.Command{
+	Use:     "visit [glob]",
+	Aliases: []string{"v"},
+	Short:   "Show the clis in one or more registries matching the given glob pattern",
+	Example: `  dp registry visit "*"
+  dp registry visit "local-*"
+  dp registry visit "*dev*"`,
+	Args: cobra.RangeArgs(0, 1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		r := "*"
+		if len(args) >= 1 {
+			r = args[0]
+		}
+		registries, err := store.GetRegistryByRegex(r)
+		if err != nil {
+			return fmt.Errorf("failed to get registries: %w", err)
+		}
+		if len(registries) == 0 {
+			fmt.Printf("No registries found matching glob '%s'\n", r)
+			return nil
+		}
+
+		for _, registry := range registries {
+			// list all clis in the registry
+			pkgs, err := remote.GetRemotePackages(registry)
+			if err != nil {
+				fmt.Printf("Failed to fetch packages from registry %s: %v\n", registry.URI, err)
+				continue
+			}
+			fmt.Printf("Registry: %s (Type: %s, Priority: %d)\n", registry.Name, registry.RegistryType, registry.Priority)
+			for pkgName, pkg := range pkgs {
+				fmt.Printf("- \033[1m%s\033[0m (Container: %s)\n", pkgName, pkg.Container)
+			}
+		}
 		return nil
 	},
 }
