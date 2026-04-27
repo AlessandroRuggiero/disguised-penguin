@@ -146,7 +146,7 @@ var registryCmd = &cobra.Command{
 }
 
 var registryAddCmd = &cobra.Command{
-	Use:               "add [uri] [type] [priority]",
+	Use:               "add [uri] [type] [priority] [name]",
 	Aliases:           []string{"a"},
 	Short:             "Add a new remote registry",
 	Args:              cobra.RangeArgs(2, 4),
@@ -289,18 +289,24 @@ var updateCmd = &cobra.Command{
 }
 
 var registryVisitCmd = &cobra.Command{
-	Use:     "visit [regex]",
+	Use:     "visit [glob]",
 	Aliases: []string{"v"},
-	Short:   "Show the clis in one or more registries matching the given regex",
-	Args:    cobra.ExactArgs(1),
+	Short:   "Show the clis in one or more registries matching the given glob pattern",
+	Example: `  dp registry visit "*"
+  dp registry visit "local-*"
+  dp registry visit "*dev*"`,
+	Args: cobra.RangeArgs(0, 1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		r := args[0]
+		r := "*"
+		if len(args) >= 1 {
+			r = args[0]
+		}
 		registries, err := store.GetRegistryByRegex(r)
 		if err != nil {
 			return fmt.Errorf("failed to get registries: %w", err)
 		}
 		if len(registries) == 0 {
-			fmt.Printf("No registries found matching regex '%s'\n", r)
+			fmt.Printf("No registries found matching glob '%s'\n", r)
 			return nil
 		}
 
@@ -311,9 +317,9 @@ var registryVisitCmd = &cobra.Command{
 				fmt.Printf("Failed to fetch packages from registry %s: %v\n", registry.URI, err)
 				continue
 			}
-			fmt.Printf("Registry: %s (Type: %s, Priority: %d)\n", registry.URI, registry.RegistryType, registry.Priority)
+			fmt.Printf("Registry: %s (Type: %s, Priority: %d)\n", registry.Name, registry.RegistryType, registry.Priority)
 			for pkgName, pkg := range pkgs {
-				fmt.Printf("- %s (Container: %s)\n", pkgName, pkg.Container)
+				fmt.Printf("- \033[1m%s\033[0m (Container: %s)\n", pkgName, pkg.Container)
 			}
 		}
 		return nil
