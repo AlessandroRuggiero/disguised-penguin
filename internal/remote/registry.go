@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 type remoteFile uint8
@@ -73,4 +74,40 @@ func GetRemoteInfo(remoteRepo models.RemoteRegistry) (models.RemotePackageInfo, 
 		return models.RemotePackageInfo{}, fmt.Errorf("failed to decode remote package info: %w", err)
 	}
 	return info, nil
+}
+
+func isSubsequence(search, target string) bool {
+	searchIdx := 0
+	targetLower := strings.ToLower(target)
+	searchLower := strings.ToLower(search)
+
+	for i := 0; i < len(targetLower) && searchIdx < len(searchLower); i++ {
+		if targetLower[i] == searchLower[searchIdx] {
+			searchIdx++
+		}
+	}
+	return searchIdx == len(searchLower)
+}
+
+func fuzzyCompare(a, b string) bool {
+	if len(a) < len(b) {
+		return isSubsequence(a, b)
+	}
+	return isSubsequence(b, a)
+}
+
+func FuzzySearchRemotePackages(remoteRepos []models.RemoteRegistry, query string) (map[string]models.RemotePackage, error) {
+	results := make(map[string]models.RemotePackage)
+	for _, repo := range remoteRepos {
+		pkgs, err := GetRemotePackages(repo)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get remote packages: %w", err)
+		}
+		for name, pkg := range pkgs {
+			if fuzzyCompare(name, query) {
+				results[name] = pkg
+			}
+		}
+	}
+	return results, nil
 }
