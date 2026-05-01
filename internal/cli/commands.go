@@ -4,9 +4,11 @@ import (
 	"disguised-penguin/internal/models"
 	"disguised-penguin/internal/remote"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -72,7 +74,16 @@ var installCmd = &cobra.Command{
 		name := args[0]
 		pkgToInstall, exists, err := store.SearchRemotePackageByName(name)
 		if err != nil {
-			return fmt.Errorf("failed to search remote package: %w", err)
+			suggestions, err := getInstallSuggestions(name)
+			if err != nil {
+				log.Printf("failed to get install suggestions: %v", err) // NEVER RETURN AN ERROR THAT IS NOT THE ORIGINAL
+				suggestions = []string{}
+			}
+			suggestion_text := ""
+			if len(suggestions) > 0 {
+				suggestion_text = fmt.Sprintf("\nDid you mean one of these?\n  %s", strings.Join(suggestions, "\n  "))
+			}
+			return fmt.Errorf("package '%s' not found in any remote registry, %s", name, suggestion_text)
 		}
 		if !exists {
 			return fmt.Errorf("package '%s' not found in any remote registry", name)

@@ -2,12 +2,15 @@ package cli
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"strings"
 
 	"disguised-penguin/internal/db"
+	"disguised-penguin/internal/remote"
 
 	"github.com/spf13/cobra"
 )
@@ -16,6 +19,25 @@ var store *db.Store
 
 func SetupBindings(dbStore *db.Store) {
 	store = dbStore
+}
+
+func getInstallSuggestions(cliName string) ([]string, error) {
+	availableRemotes, err := store.ListRegistries()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list registries: %w", err)
+	}
+	results, err := remote.FuzzySearchRemotePackages(availableRemotes, cliName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search remote packages: %w", err)
+	}
+	if len(results) == 0 {
+		return nil, fmt.Errorf("no matching CLI found")
+	}
+	var names []string
+	for name, _ := range results {
+		names = append(names, name)
+	}
+	return names, nil
 }
 
 var rootCmd = &cobra.Command{
@@ -44,7 +66,16 @@ var rootCmd = &cobra.Command{
 		cliName := args[0]
 		cli, err := store.GetCliByName(cliName)
 		if err != nil {
-			return fmt.Errorf("failed to get CLI: %w", err)
+			suggestions, err := getInstallSuggestions(cliName)
+			if err != nil {
+				log.Printf("failed to get install suggestions: %v", err) // NEVER RETURN AN ERROR THAT IS NOT THE ORIGINAL
+				suggestions = []string{}
+			}
+			suggestion_text := ""
+			if len(suggestions) > 0 {
+				suggestion_text = fmt.Sprintf("\nDid you mean one of these?\n  %s", strings.Join(suggestions, "\n  "))
+			}
+			return fmt.Errorf("CLI %s is not installed%s\n", cliName, suggestion_text)
 		}
 
 		cwd, err := os.Getwd()
