@@ -3,10 +3,14 @@ package cli
 import (
 	"disguised-penguin/internal/models"
 	"disguised-penguin/internal/remote"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -295,6 +299,82 @@ var updateCmd = &cobra.Command{
 			return fmt.Errorf("failed to update CLI in db: %w", err)
 		}
 
+		return nil
+	},
+}
+
+var selfUpdateCmd = &cobra.Command{
+	Use:   "self-update",
+	Short: "Update the disguised-penguin CLI to the latest version",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// Fetch the latest release info from GitHub API
+		apiURL := "https://api.github.com/repos/AlessandroRuggiero/disguised-penguin/releases/latest"
+		respAPI, err := http.Get(apiURL)
+		if err != nil {
+			return fmt.Errorf("failed to fetch latest release info: %w", err)
+		}
+		defer respAPI.Body.Close()
+
+		if respAPI.StatusCode != http.StatusOK {
+			return fmt.Errorf("failed to fetch latest release info: HTTP %d", respAPI.StatusCode)
+		}
+
+		var release struct {
+			TagName string `json:"tag_name"`
+		}
+		if err := json.NewDecoder(respAPI.Body).Decode(&release); err != nil {
+			return fmt.Errorf("failed to parse release info: %w", err)
+		}
+
+		fmt.Printf("Current version: %s\n", Version)
+		fmt.Printf("Latest version:  %s\n", release.TagName)
+
+		if Version == release.TagName {
+			fmt.Println("You are already on the latest version!")
+			return nil
+		}
+
+		fmt.Println("Updating...")
+
+		url := "https://github.com/AlessandroRuggiero/disguised-penguin/releases/latest/download/dp"
+		resp, err := http.Get(url)
+		if err != nil {
+			return fmt.Errorf("failed to download latest version: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("failed to download: HTTP %d", resp.StatusCode)
+		}
+
+		exePath, err := os.Executable()
+		if err != nil {
+			return fmt.Errorf("failed to determine executable path: %w", err)
+		}
+		exePath, err = filepath.EvalSymlinks(exePath)
+		if err != nil {
+			return fmt.Errorf("failed to resolve executable path: %w", err)
+		}
+
+		tempFile := exePath + ".new"
+		out, err := os.OpenFile(tempFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+		if err != nil {
+			return fmt.Errorf("failed to create temporary file '%s': %w (you might need elevated privileges)", tempFile, err)
+		}
+
+		if _, err = io.Copy(out, resp.Body); err != nil {
+			out.Close()
+			os.Remove(tempFile)
+			return fmt.Errorf("failed to write latest version: %w", err)
+		}
+		out.Close()
+
+		if err := os.Rename(tempFile, exePath); err != nil {
+			os.Remove(tempFile)
+			return fmt.Errorf("failed to update executable: %w (you might need elevated privileges)", err)
+		}
+
+		fmt.Printf("Successfully updated 'dp' to %s.\n", release.TagName)
 		return nil
 	},
 }
