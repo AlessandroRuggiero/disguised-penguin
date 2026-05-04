@@ -336,3 +336,81 @@ var registryVisitCmd = &cobra.Command{
 		return nil
 	},
 }
+
+var workspaceCmd = &cobra.Command{
+	Use:     "workspace",
+	Aliases: []string{"ws"},
+	Short:   "Manage workspaces",
+}
+
+var workspaceAddCmd = &cobra.Command{
+	Use:               "add [name]",
+	Aliases:           []string{"a"},
+	Short:             "Add a new workspace",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: cobra.NoFileCompletions,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name := args[0]
+		if err := store.AddWorkspace(name); err != nil {
+			return fmt.Errorf("failed to add workspace: %w", err)
+		}
+		fmt.Printf("Successfully added workspace '%s'\n", name)
+		return nil
+	},
+}
+
+var workspaceRemoveCmd = &cobra.Command{
+	Use:     "remove [name]",
+	Aliases: []string{"rm", "r"},
+	Short:   "Remove a workspace",
+	Args:    cobra.ExactArgs(1),
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) != 0 {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		workspaces, err := store.ListWorkspaces()
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveError
+		}
+		var names []string
+		for _, w := range workspaces {
+			names = append(names, w.Name)
+		}
+		return names, cobra.ShellCompDirectiveNoFileComp
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name := args[0]
+		ok, err := store.RemoveWorkspace(name)
+		if err != nil {
+			return fmt.Errorf("failed to remove workspace: %w", err)
+		}
+		if !ok {
+			fmt.Printf("No workspace found with name '%s'\n", name)
+		} else {
+			fmt.Printf("Successfully removed workspace '%s'\n", name)
+		}
+		return nil
+	},
+}
+
+var workspaceListCmd = &cobra.Command{
+	Use:     "list",
+	Aliases: []string{"ls"},
+	Short:   "List all workspaces",
+	Args:    cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		workspaces, err := store.ListWorkspaces()
+		if err != nil {
+			return err
+		}
+		if len(workspaces) == 0 {
+			fmt.Println("No workspaces found.")
+			return nil
+		}
+		fmt.Println("Workspaces:")
+		for _, w := range workspaces {
+			fmt.Printf("- %s\n", w.Name)
+		}
+		return nil
+	},
+}

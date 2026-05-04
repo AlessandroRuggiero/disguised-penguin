@@ -63,7 +63,27 @@ var rootCmd = &cobra.Command{
 		return names, cobra.ShellCompDirectiveNoFileComp
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cliName := args[0]
+		var cliArgs []string = args
+		workspace := "default"
+
+		for len(cliArgs) > 0 {
+			if cliArgs[0] == "-w" || cliArgs[0] == "--workspace" {
+				if len(cliArgs) > 1 {
+					workspace = cliArgs[1]
+					cliArgs = cliArgs[2:]
+				} else {
+					return fmt.Errorf("flag needs an argument: '%s'", cliArgs[0])
+				}
+			} else {
+				break
+			}
+		}
+
+		if len(cliArgs) == 0 {
+			return fmt.Errorf("requires at least 1 arg, only received 0")
+		}
+
+		cliName := cliArgs[0]
 		cli, err := store.GetCliByName(cliName)
 		if err != nil {
 			suggestions, err := getInstallSuggestions(cliName)
@@ -96,7 +116,7 @@ var rootCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("failed to get app data dir: %w", err)
 		}
-		volumesDir := filepath.Join(filepath.Dir(appDataDir), "volumes", cli.Name)
+		volumesDir := filepath.Join(filepath.Dir(appDataDir), "workspaces", workspace, "volumes", cli.Name)
 
 		for volumeName, containerPath := range cli.ConfigMounts {
 			hostVolumePath := filepath.Join(volumesDir, volumeName)
@@ -111,7 +131,7 @@ var rootCmd = &cobra.Command{
 		}
 
 		dockerArgs = append(dockerArgs, cli.ContainerName)
-		dockerArgs = append(dockerArgs, args[1:]...)
+		dockerArgs = append(dockerArgs, cliArgs[1:]...)
 		dockerCmd := exec.Command("docker", dockerArgs...)
 		dockerCmd.Stdin = os.Stdin
 		dockerCmd.Stdout = os.Stdout
@@ -136,9 +156,15 @@ func init() {
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(eraseDBCmd)
+
 	rootCmd.AddCommand(registryCmd)
 	registryCmd.AddCommand(registryAddCmd)
 	registryCmd.AddCommand(registryListCmd)
 	registryCmd.AddCommand(registryRemoveCmd)
 	registryCmd.AddCommand(registryVisitCmd)
+
+	rootCmd.AddCommand(workspaceCmd)
+	workspaceCmd.AddCommand(workspaceAddCmd)
+	workspaceCmd.AddCommand(workspaceRemoveCmd)
+	workspaceCmd.AddCommand(workspaceListCmd)
 }
