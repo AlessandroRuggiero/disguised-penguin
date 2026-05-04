@@ -105,6 +105,42 @@ dp registry remove <uri>
 dp registry visit [glob]
 ```
 
+### Manage Workspaces
+
+Workspaces allow you to isolate the state and configurations of your CLIs by using separate persistent volume environments.
+
+```bash
+# Add a new workspace
+dp workspace add <name>
+
+# List workspaces
+dp workspace list
+
+# Remove a workspace
+dp workspace remove <name>
+```
+
+### Run a CLI in a specific workspace
+
+You can use the `-w` or `--workspace` flag *before* the CLI name to run a tool in a specific workspace environment (defaults to `default`).
+
+```bash
+dp -w <workspace-name> <cli-name> [args...]
+# or
+dp --workspace <workspace-name> <cli-name> [args...]
+```
+#### Example: Using Multiple Google Accounts with Gemini
+If you have two Google accounts, you can create a separate workspace for the second one and run the CLI agent in the corresponding workspace to use that account's free Gemini tokens.
+
+```bash
+# start the CLI in the default workspace (google-account-1)
+dp gemini
+
+# create a new workspace for the second google account
+dp workspace add google-account-2
+# start the CLI in the second workspace (google-account-2)
+dp -w google-account-2 gemini
+```
 ### Database Management
 
 ```bash

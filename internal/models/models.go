@@ -34,6 +34,11 @@ type RemotePackageInfo struct {
 	Description *string `json:"description"`
 }
 
+type Workspace struct {
+	ID   int
+	Name string
+}
+
 func MakeRegistryType(s string) (RegistryType, error) {
 	switch s {
 	case "github":

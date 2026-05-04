@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"disguised-penguin/internal/models"
 	"disguised-penguin/internal/remote"
@@ -82,10 +83,17 @@ registry_type TEXT,
 priority INTEGER DEFAULT 0,
 name TEXT UNIQUE
 );
+CREATE TABLE IF NOT EXISTS workspaces (
+id INTEGER PRIMARY KEY AUTOINCREMENT,
+name TEXT UNIQUE
+);
 
 INSERT INTO registries (uri, registry_type, priority, name)
 SELECT ?, ?, ?, ?
 WHERE NOT EXISTS (SELECT 1 FROM registries);
+INSERT INTO workspaces (name)
+SELECT 'default'
+WHERE NOT EXISTS (SELECT 1 FROM workspaces);
 `, defaultRegistry.URI, defaultRegistry.RegistryType, defaultRegistry.Priority, defaultRegistry.Name)
 	return err
 }
@@ -243,4 +251,57 @@ func (s *Store) UpdateCLI(name string, pkg *models.RemotePackage) error {
 	}
 	_, err = s.db.Exec(`UPDATE clis SET container_name = ?, config_mounts = ?, port_mappings = ? WHERE name = ?`, pkg.Container, string(configMountsBytes), string(portMappingsBytes), name)
 	return err
+}
+
+func (s *Store) GetWorkspaceByName(name string) (*models.Workspace, bool, error) {
+	var workspace models.Workspace
+	err := s.db.QueryRow(`SELECT id, name FROM workspaces WHERE name = ?`, name).Scan(&workspace.ID, &workspace.Name)
+	if err == sql.ErrNoRows {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to query workspace: %w", err)
+	}
+	return &workspace, true, nil
+}
+
+func (s *Store) AddWorkspace(name string) error {
+	_, err := s.db.Exec(`INSERT INTO workspaces (name) VALUES (?)`, name)
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return fmt.Errorf("workspace '%s' already exists", name)
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *Store) RemoveWorkspace(name string) (bool, error) {
+	result, err := s.db.Exec(`DELETE FROM workspaces WHERE name = ?`, name)
+	if err != nil {
+		return false, err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rowsAffected > 0, nil
+}
+
+func (s *Store) ListWorkspaces() ([]models.Workspace, error) {
+	rows, err := s.db.Query(`SELECT id, name FROM workspaces`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query workspaces: %w", err)
+	}
+	defer rows.Close()
+
+	var workspaces []models.Workspace
+	for rows.Next() {
+		var ws models.Workspace
+		if err := rows.Scan(&ws.ID, &ws.Name); err != nil {
+			return nil, fmt.Errorf("failed to scan workspace row: %w", err)
+		}
+		workspaces = append(workspaces, ws)
+	}
+	return workspaces, nil
 }
