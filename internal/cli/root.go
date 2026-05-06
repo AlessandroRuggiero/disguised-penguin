@@ -17,6 +17,8 @@ import (
 
 var store *db.Store
 
+var Version = "dev"
+
 func SetupBindings(dbStore *db.Store) {
 	store = dbStore
 }
@@ -44,6 +46,7 @@ var rootCmd = &cobra.Command{
 	Use:                "dp  [cli_name] [args...]",
 	Short:              "Run CLI applications in a containerized environment",
 	Long:               ``,
+	Version:            Version,
 	Args:               cobra.MinimumNArgs(1),
 	DisableFlagParsing: true,
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -155,6 +158,7 @@ func init() {
 	rootCmd.AddCommand(installCmd)
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(updateCmd)
+	rootCmd.AddCommand(selfUpdateCmd)
 	rootCmd.AddCommand(eraseDBCmd)
 
 	rootCmd.AddCommand(registryCmd)

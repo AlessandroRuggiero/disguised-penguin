@@ -2,24 +2,22 @@ package db
 
 import (
 	"database/sql"
+	"disguised-penguin/internal/models"
+	"disguised-penguin/internal/remote"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
-
-	"disguised-penguin/internal/models"
-	"disguised-penguin/internal/remote"
 
 	_ "modernc.org/sqlite"
 )
 
-var defaultRegistry models.RemoteRegistry = models.RemoteRegistry{
-	URI:          "https://raw.githubusercontent.com/AlessandroRuggiero/disguised-penguin-repo/main",
-	RegistryType: models.RegistryTypeGitHub,
-	Priority:     0,
-	Name:         "default",
-}
+//go:embed migrations/*.sql
+var migrationFiles embed.FS
 
 type Store struct {
 	db     *sql.DB
@@ -56,7 +54,7 @@ func NewStore() (*Store, error) {
 	}
 
 	store := &Store{db: db, dbPath: dbPath}
-	if err := store.InitSchema(); err != nil {
+	if err := store.RunMigrations(); err != nil {
 		store.Close()
 		return nil, err
 	}
@@ -68,34 +66,53 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-func (s *Store) InitSchema() error {
-	_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS clis (
-id INTEGER PRIMARY KEY AUTOINCREMENT, 
-name TEXT UNIQUE, 
-container_name TEXT,
-config_mounts TEXT,
-port_mappings TEXT
-);
-CREATE TABLE IF NOT EXISTS registries (
-id INTEGER PRIMARY KEY AUTOINCREMENT, 
-uri TEXT UNIQUE,
-registry_type TEXT,
-priority INTEGER DEFAULT 0,
-name TEXT UNIQUE
-);
-CREATE TABLE IF NOT EXISTS workspaces (
-id INTEGER PRIMARY KEY AUTOINCREMENT,
-name TEXT UNIQUE
-);
+func (s *Store) RunMigrations() error {
+	var currentVersion int
+	if err := s.db.QueryRow("PRAGMA user_version;").Scan(&currentVersion); err != nil {
+		return fmt.Errorf("failed to check current db version: %w", err)
+	}
 
-INSERT INTO registries (uri, registry_type, priority, name)
-SELECT ?, ?, ?, ?
-WHERE NOT EXISTS (SELECT 1 FROM registries);
-INSERT INTO workspaces (name)
-SELECT 'default'
-WHERE NOT EXISTS (SELECT 1 FROM workspaces);
-`, defaultRegistry.URI, defaultRegistry.RegistryType, defaultRegistry.Priority, defaultRegistry.Name)
-	return err
+	entries, err := migrationFiles.ReadDir("migrations")
+	if err != nil {
+		return fmt.Errorf("failed to read migrations directory: %w", err)
+	}
+
+	// Sort files to ensure strict version ordering
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Name() < entries[j].Name()
+	})
+
+	for _, entry := range entries {
+		name := entry.Name()
+		parts := strings.Split(name, "_")
+		if len(parts) < 2 {
+			continue
+		}
+
+		migVersion, err := strconv.Atoi(parts[0])
+		if err != nil {
+			return fmt.Errorf("invalid migration file prefix (must be integer): %s", name)
+		}
+
+		if migVersion > currentVersion {
+			content, err := migrationFiles.ReadFile(filepath.Join("migrations", name))
+			if err != nil {
+				return fmt.Errorf("failed to read migration %s: %w", name, err)
+			}
+
+			// Execute migration
+			if _, err := s.db.Exec(string(content)); err != nil {
+				return fmt.Errorf("failed to apply migration %s: %w", name, err)
+			}
+
+			// Update user_version
+			if _, err := s.db.Exec(fmt.Sprintf("PRAGMA user_version = %d;", migVersion)); err != nil {
+				return fmt.Errorf("failed to update db version after migration %s: %w", name, err)
+			}
+		}
+	}
+
+	return nil
 }
 
 func (s *Store) GetCliByName(name string) (*models.CLI, error) {

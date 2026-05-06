@@ -8,7 +8,7 @@ all: build
 
 build:
 	@echo "Building $(APP_NAME)..."
-	@go build -o $(BIN_DIR)/$(APP_NAME) ./$(CMD_DIR)
+	@go build -ldflags "-X disguised-penguin/internal/cli.Version=$(shell git describe --tags --always --dirty 2>/dev/null || echo dev)" -o $(BIN_DIR)/$(APP_NAME) ./$(CMD_DIR)
 
 run: build
 	@echo "Running $(APP_NAME)..."
