@@ -154,6 +154,11 @@ var listCmd = &cobra.Command{
 	},
 }
 
+var internalCmd = &cobra.Command{
+	Use:   "internal",
+	Short: "Internal maintenance commands",
+}
+
 var eraseDBCmd = &cobra.Command{
 	Use:   "erase-db",
 	Short: "Erase the entire CLI database (use with caution)",

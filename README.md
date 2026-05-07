@@ -18,6 +18,16 @@ curl -L -o /usr/local/bin/dp https://github.com/AlessandroRuggiero/disguised-pen
 chmod +x /usr/local/bin/dp
 ```
 
+### Updating `dp`
+
+If you installed `dp` via the GitHub Releases binary, you can update it to the latest release with:
+
+```bash
+dp self-update
+```
+
+Note: this overwrites the currently running executable, so it may require write permissions to the install path (e.g. `/usr/local/bin`).
+
 ### Building from source
 
 If you prefer to build it yourself:
@@ -79,6 +89,13 @@ dp remove <name>
 dp update <name>
 ```
 Updates the CLI package locally by pulling the latest mapped container image.
+
+### Update `dp` itself
+
+```bash
+dp self-update
+```
+Downloads the latest `dp` binary from GitHub Releases and replaces the current executable.
 
 ### List installed CLIs
 
@@ -145,7 +162,7 @@ dp -w google-account-2 gemini
 
 ```bash
 # Danger: Erases the entire CLI database
-dp erase-db
+dp internal erase-db
 ```
 
 ## Usage Examples
@@ -172,7 +189,11 @@ dp registry visit new-registry-name
 
 ## How It Works
 
-Disguised Penguin maintains a local SQLite database (`~/.local/share/disguised-penguin/data.db`) storing CLI configurations. When you run a CLI, it spawns a Docker container with:
+Disguised Penguin maintains a local SQLite database (`~/.local/share/disguised-penguin/data.db`) storing CLI configurations, registries, and workspaces. On startup, `dp` automatically applies embedded database migrations (and will create/seed the DB on first run, including a `default` registry and a `default` workspace).
+
+Workspace state is stored under `~/.local/share/disguised-penguin/workspaces/<workspace>/` (with per-CLI persistent volumes under `.../volumes/<cli>/`).
+
+When you run a CLI, it spawns a Docker container with:
 
 - Your current directory mounted to `/workspace`
 - Config volumes mounted at their configured paths

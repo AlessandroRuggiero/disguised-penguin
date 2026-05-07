@@ -159,7 +159,9 @@ func init() {
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(selfUpdateCmd)
-	rootCmd.AddCommand(eraseDBCmd)
+
+	rootCmd.AddCommand(internalCmd)
+	internalCmd.AddCommand(eraseDBCmd)
 
 	rootCmd.AddCommand(registryCmd)
 	registryCmd.AddCommand(registryAddCmd)
