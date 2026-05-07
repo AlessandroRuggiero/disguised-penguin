@@ -11,11 +11,30 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
 )
+
+func printKeyValueSection(title string, m map[string]string) {
+	fmt.Printf("%s:\n", title)
+	if len(m) == 0 {
+		fmt.Println("  (none)")
+		return
+	}
+
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, k := range keys {
+		fmt.Printf("  - %s -> %s\n", k, m[k])
+	}
+}
 
 var addCmd = &cobra.Command{
 	Use:               "add [name] [container_name]",
@@ -83,11 +102,11 @@ var installCmd = &cobra.Command{
 				log.Printf("failed to get install suggestions: %v", err) // NEVER RETURN AN ERROR THAT IS NOT THE ORIGINAL
 				suggestions = []string{}
 			}
-			suggestion_text := ""
+			suggestionText := ""
 			if len(suggestions) > 0 {
-				suggestion_text = fmt.Sprintf("\nDid you mean one of these?\n  %s", strings.Join(suggestions, "\n  "))
+				suggestionText = fmt.Sprintf("\nDid you mean one of these?\n  %s", strings.Join(suggestions, "\n  "))
 			}
-			return fmt.Errorf("package '%s' not found in any remote registry, %s", name, suggestion_text)
+			return fmt.Errorf("package '%s' not found in any remote registry. %s", name, suggestionText)
 		}
 		if !exists {
 			return fmt.Errorf("package '%s' not found in any remote registry", name)
@@ -108,8 +127,8 @@ var installCmd = &cobra.Command{
 		}
 		fmt.Printf("Successfully pulled Docker image '%s'\n", pkgToInstall.Container)
 
-		fmt.Println("Config mounts:", pkgToInstall.ConfigMounts)
-		fmt.Println("Port mappings:", pkgToInstall.PortMappings)
+		printKeyValueSection("Config mounts", pkgToInstall.ConfigMounts)
+		printKeyValueSection("Port mappings", pkgToInstall.PortMappings)
 
 		if err := store.InstallCLI(name, pkgToInstall); err != nil {
 			return fmt.Errorf("failed to insert CLI into db: %w", err)
@@ -292,8 +311,8 @@ var updateCmd = &cobra.Command{
 		}
 		fmt.Printf("Successfully pulled latest Docker image '%s'\n", pkgToUpdate.Container)
 
-		fmt.Println("Config mounts:", pkgToUpdate.ConfigMounts)
-		fmt.Println("Port mappings:", pkgToUpdate.PortMappings)
+		printKeyValueSection("Config mounts", pkgToUpdate.ConfigMounts)
+		printKeyValueSection("Port mappings", pkgToUpdate.PortMappings)
 
 		if err := store.UpdateCLI(name, pkgToUpdate); err != nil {
 			return fmt.Errorf("failed to update CLI in db: %w", err)
