@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"disguised-penguin/internal/container"
 	"disguised-penguin/internal/models"
 	"disguised-penguin/internal/remote"
 	"encoding/json"
@@ -90,11 +91,15 @@ var rmCmd = &cobra.Command{
 var installCmd = &cobra.Command{
 	Use:               "install [name]",
 	Aliases:           []string{"i"},
-	Short:             "Install a CLI configuration by pulling the associated Docker image",
+	Short:             "Install a CLI configuration by pulling the associated container image",
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: cobra.NoFileCompletions,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
+		runtime, err := container.ResolveRuntime(containerRuntimeFlag)
+		if err != nil {
+			return err
+		}
 		pkgToInstall, exists, err := store.SearchRemotePackageByName(name)
 		if err != nil {
 			suggestions, err := getInstallSuggestions(name)
@@ -117,15 +122,15 @@ var installCmd = &cobra.Command{
 			return fmt.Errorf("CLI '%s' is already installed", name)
 		}
 
-		fmt.Printf("Pulling Docker image '%s' for CLI '%s'...\n", pkgToInstall.Container, name)
-		dockerCmd := exec.Command("docker", "pull", pkgToInstall.Container)
-		dockerCmd.Stdout = os.Stdout
-		dockerCmd.Stderr = os.Stderr
+		fmt.Printf("Pulling image '%s' for CLI '%s' using %s...\n", pkgToInstall.Container, name, runtime)
+		runtimeCmd := exec.Command(string(runtime), "pull", pkgToInstall.Container)
+		runtimeCmd.Stdout = os.Stdout
+		runtimeCmd.Stderr = os.Stderr
 
-		if err := dockerCmd.Run(); err != nil {
-			return fmt.Errorf("failed to pull docker image: %w", err)
+		if err := runtimeCmd.Run(); err != nil {
+			return fmt.Errorf("failed to pull image with %s: %w", runtime, err)
 		}
-		fmt.Printf("Successfully pulled Docker image '%s'\n", pkgToInstall.Container)
+		fmt.Printf("Successfully pulled image '%s'\n", pkgToInstall.Container)
 
 		printKeyValueSection("Config mounts", pkgToInstall.ConfigMounts)
 		printKeyValueSection("Port mappings", pkgToInstall.PortMappings)
@@ -280,7 +285,7 @@ var registryRemoveCmd = &cobra.Command{
 var updateCmd = &cobra.Command{
 	Use:     "update [name]",
 	Aliases: []string{"u"},
-	Short:   "Update a CLI configuration by pulling the latest Docker image",
+	Short:   "Update a CLI configuration by pulling the latest container image",
 	Args:    cobra.ExactArgs(1),
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if len(args) != 0 {
@@ -298,6 +303,10 @@ var updateCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
+		runtime, err := container.ResolveRuntime(containerRuntimeFlag)
+		if err != nil {
+			return err
+		}
 		pkgToUpdate, exists, err := store.SearchRemotePackageByName(name)
 		if err != nil {
 			return fmt.Errorf("failed to search remote package: %w", err)
@@ -306,15 +315,15 @@ var updateCmd = &cobra.Command{
 			return fmt.Errorf("package '%s' not found in any remote registry", name)
 		}
 
-		fmt.Printf("Pulling latest Docker image '%s' for CLI '%s'...\n", pkgToUpdate.Container, name)
-		dockerCmd := exec.Command("docker", "pull", pkgToUpdate.Container)
-		dockerCmd.Stdout = os.Stdout
-		dockerCmd.Stderr = os.Stderr
+		fmt.Printf("Pulling latest image '%s' for CLI '%s' using %s...\n", pkgToUpdate.Container, name, runtime)
+		runtimeCmd := exec.Command(string(runtime), "pull", pkgToUpdate.Container)
+		runtimeCmd.Stdout = os.Stdout
+		runtimeCmd.Stderr = os.Stderr
 
-		if err := dockerCmd.Run(); err != nil {
-			return fmt.Errorf("failed to pull docker image: %w", err)
+		if err := runtimeCmd.Run(); err != nil {
+			return fmt.Errorf("failed to pull image with %s: %w", runtime, err)
 		}
-		fmt.Printf("Successfully pulled latest Docker image '%s'\n", pkgToUpdate.Container)
+		fmt.Printf("Successfully pulled latest image '%s'\n", pkgToUpdate.Container)
 
 		printKeyValueSection("Config mounts", pkgToUpdate.ConfigMounts)
 		printKeyValueSection("Port mappings", pkgToUpdate.PortMappings)
