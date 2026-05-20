@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"disguised-penguin/internal/container"
 	"disguised-penguin/internal/db"
 	"disguised-penguin/internal/remote"
 
@@ -18,6 +19,8 @@ import (
 var store *db.Store
 
 var Version = "dev"
+
+var containerRuntimeFlag string
 
 func SetupBindings(dbStore *db.Store) {
 	store = dbStore
@@ -68,6 +71,7 @@ var rootCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var cliArgs []string = args
 		workspace := "default"
+		runtimeRequested := containerRuntimeFlag
 
 		for len(cliArgs) > 0 {
 			if cliArgs[0] == "-w" || cliArgs[0] == "--workspace" {
@@ -77,6 +81,16 @@ var rootCmd = &cobra.Command{
 				} else {
 					return fmt.Errorf("flag needs an argument: '%s'", cliArgs[0])
 				}
+			} else if cliArgs[0] == "--runtime" {
+				if len(cliArgs) > 1 {
+					runtimeRequested = cliArgs[1]
+					cliArgs = cliArgs[2:]
+				} else {
+					return fmt.Errorf("flag needs an argument: '%s'", cliArgs[0])
+				}
+			} else if strings.HasPrefix(cliArgs[0], "--runtime=") {
+				runtimeRequested = strings.TrimPrefix(cliArgs[0], "--runtime=")
+				cliArgs = cliArgs[1:]
 			} else {
 				break
 			}
@@ -106,11 +120,16 @@ var rootCmd = &cobra.Command{
 			return fmt.Errorf("failed to get current directory: %w", err)
 		}
 
-		dockerArgs := []string{"run", "--rm", "-it", "-v", fmt.Sprintf("%s:/workspace", cwd), "-w", "/workspace"}
+		runtime, err := container.ResolveRuntime(runtimeRequested)
+		if err != nil {
+			return err
+		}
+
+		runtimeArgs := []string{"run", "--rm", "-it", "-v", fmt.Sprintf("%s:/workspace", cwd), "-w", "/workspace"}
 
 		if currentUser, err := user.Current(); err == nil {
-			dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("PUID=%s", currentUser.Uid))
-			dockerArgs = append(dockerArgs, "-e", fmt.Sprintf("PGID=%s", currentUser.Gid))
+			runtimeArgs = append(runtimeArgs, "-e", fmt.Sprintf("PUID=%s", currentUser.Uid))
+			runtimeArgs = append(runtimeArgs, "-e", fmt.Sprintf("PGID=%s", currentUser.Gid))
 		} else {
 			fmt.Printf("Warning: Could not get current user info: %v. Container may run as root.\n", err)
 		}
@@ -126,22 +145,22 @@ var rootCmd = &cobra.Command{
 			if err := os.MkdirAll(hostVolumePath, 0755); err != nil {
 				return fmt.Errorf("failed to create host volume directory: %w", err)
 			}
-			dockerArgs = append(dockerArgs, "-v", fmt.Sprintf("%s:%s", hostVolumePath, containerPath))
+			runtimeArgs = append(runtimeArgs, "-v", fmt.Sprintf("%s:%s", hostVolumePath, containerPath))
 		}
 
 		for hostPort, containerPort := range cli.PortMappings {
-			dockerArgs = append(dockerArgs, "-p", fmt.Sprintf("%s:%s", hostPort, containerPort))
+			runtimeArgs = append(runtimeArgs, "-p", fmt.Sprintf("%s:%s", hostPort, containerPort))
 		}
 
-		dockerArgs = append(dockerArgs, cli.ContainerName)
-		dockerArgs = append(dockerArgs, cliArgs[1:]...)
-		dockerCmd := exec.Command("docker", dockerArgs...)
-		dockerCmd.Stdin = os.Stdin
-		dockerCmd.Stdout = os.Stdout
-		dockerCmd.Stderr = os.Stderr
+		runtimeArgs = append(runtimeArgs, cli.ContainerName)
+		runtimeArgs = append(runtimeArgs, cliArgs[1:]...)
+		runtimeCmd := exec.Command(string(runtime), runtimeArgs...)
+		runtimeCmd.Stdin = os.Stdin
+		runtimeCmd.Stdout = os.Stdout
+		runtimeCmd.Stderr = os.Stderr
 
-		if err := dockerCmd.Run(); err != nil {
-			return fmt.Errorf("failed to run docker container: %w", err)
+		if err := runtimeCmd.Run(); err != nil {
+			return fmt.Errorf("failed to run container with %s: %w", runtime, err)
 		}
 		return nil
 	},
@@ -152,6 +171,8 @@ func Execute() error {
 }
 
 func init() {
+	rootCmd.PersistentFlags().StringVar(&containerRuntimeFlag, "runtime", string(container.RuntimeAuto), "Container runtime to use: auto, docker, podman (also supports env DP_CONTAINER_RUNTIME)")
+
 	rootCmd.AddCommand(installCompletionsCmd)
 	rootCmd.AddCommand(addCmd)
 	rootCmd.AddCommand(rmCmd)

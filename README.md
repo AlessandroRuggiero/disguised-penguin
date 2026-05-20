@@ -1,6 +1,6 @@
 # Disguised Penguin (dp)
 
-Run CLI applications in secure, isolated Docker containers without cluttering your system. Disguised Penguin completely sandboxes your tools, preventing them from accessing sensitive files on your host machine, while keeping them as **seamless** to use as native applications.
+Run CLI applications in secure, isolated containers (Docker or Podman) without cluttering your system. Disguised Penguin completely sandboxes your tools, preventing them from accessing sensitive files on your host machine, while keeping them as **seamless** to use as native applications.
 
 ### Examples:
 - **AI CLI Agents (like `opencode`)**: Run AI assistants safely. They get full access to your current project workspace, but are physically blocked from reading your personal `~/.ssh` keys or browsing your private system files.
@@ -60,7 +60,20 @@ This will automatically add the completion script source command to your `~/.bas
 dp install <package-name>
 ```
 
-This pulls the Docker image and registers the CLI locally.
+This pulls the container image and registers the CLI locally.
+
+### Container runtime (Docker/Podman)
+
+By default, `dp` auto-detects a container runtime (prefers Docker if present, otherwise Podman).
+
+- Use a flag: `dp --runtime=podman install <package-name>`
+- Or use an env var: `DP_CONTAINER_RUNTIME=podman dp install <package-name>`
+
+To run an installed CLI with Podman:
+
+```bash
+dp --runtime=podman <cli-name> [args...]
+```
 
 ### Run a CLI in a container
 
@@ -193,7 +206,7 @@ Disguised Penguin maintains a local SQLite database (`~/.local/share/disguised-p
 
 Workspace state is stored under `~/.local/share/disguised-penguin/workspaces/<workspace>/` (with per-CLI persistent volumes under `.../volumes/<cli>/`).
 
-When you run a CLI, it spawns a Docker container with:
+When you run a CLI, it spawns a container with:
 
 - Your current directory mounted to `/workspace`
 - Config volumes mounted at their configured paths
