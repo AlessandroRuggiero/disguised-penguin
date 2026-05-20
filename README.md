@@ -10,13 +10,16 @@ To see practical usage examples, check out the [Usage Examples](#usage-examples)
 
 ## Installation
 
-Download the latest `dp` binary from the [GitHub Releases](https://github.com/AlessandroRuggiero/disguised-penguin/releases) page and place it in your PATH (e.g., `/usr/local/bin/dp`).
+Download the latest `dp` binary from the [GitHub Releases](https://github.com/AlessandroRuggiero/disguised-penguin/releases) page and place it in your PATH (e.g., `/usr/local/bin/dp` or `~/.local/bin/dp`).
 
 ```bash
 # Example for Linux/macOS
-curl -L -o /usr/local/bin/dp https://github.com/AlessandroRuggiero/disguised-penguin/releases/latest/download/dp
-chmod +x /usr/local/bin/dp
+mkdir -p ~/.local/bin
+curl -L -o ~/.local/bin/dp https://github.com/AlessandroRuggiero/disguised-penguin/releases/latest/download/dp
+chmod +x ~/.local/bin/dp
 ```
+
+Remember to install completions: [see below](#enabling-autocompletion).
 
 ### Updating `dp`
 
