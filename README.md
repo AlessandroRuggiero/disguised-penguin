@@ -216,9 +216,8 @@ When you run a CLI, it spawns a container with:
 - Port mappings exposed as specified
 
 ## Requirements
-
-- Go 1.25+
-- Docker
+- To run `dp` (release binary): Docker or Podman (available in `PATH`)
+- To build from source: Go 1.25+
 
 ## License
 
