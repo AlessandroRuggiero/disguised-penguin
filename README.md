@@ -13,9 +13,17 @@ To see practical usage examples, check out the [Usage Examples](#usage-examples)
 Download the latest `dp` binary from the [GitHub Releases](https://github.com/AlessandroRuggiero/disguised-penguin/releases) page and place it in your PATH (e.g., `/usr/local/bin/dp` or `~/.local/bin/dp`).
 
 ```bash
-# Example for Linux/macOS
+# Linux (amd64)
 mkdir -p ~/.local/bin
 curl -L -o ~/.local/bin/dp https://github.com/AlessandroRuggiero/disguised-penguin/releases/latest/download/dp
+chmod +x ~/.local/bin/dp
+```
+
+```bash
+# macOS (Apple Silicon / Intel, auto-detected)
+mkdir -p ~/.local/bin
+arch=$([ "$(uname -m)" = "arm64" ] && echo arm64 || echo amd64)
+curl -L -o ~/.local/bin/dp "https://github.com/AlessandroRuggiero/disguised-penguin/releases/latest/download/dp-darwin-$arch"
 chmod +x ~/.local/bin/dp
 ```
 
@@ -216,7 +224,8 @@ When you run a CLI, it spawns a container with:
 - Port mappings exposed as specified
 
 ## Requirements
-- To run `dp` (release binary): Docker or Podman (available in `PATH`)
+- Platforms: Linux (amd64) and macOS (amd64/arm64)
+- To run `dp` (release binary): Docker or Podman (available in `PATH`), on macOS, Docker Desktop or Podman Desktop/`podman machine`
 - To build from source: Go 1.25+
 
 ## License
