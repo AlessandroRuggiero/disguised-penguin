@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 
 	"disguised-penguin/internal/container"
@@ -127,11 +128,16 @@ var rootCmd = &cobra.Command{
 
 		runtimeArgs := []string{"run", "--rm", "-it", "-v", fmt.Sprintf("%s:/workspace", cwd), "-w", "/workspace"}
 
-		if currentUser, err := user.Current(); err == nil {
-			runtimeArgs = append(runtimeArgs, "-e", fmt.Sprintf("PUID=%s", currentUser.Uid))
-			runtimeArgs = append(runtimeArgs, "-e", fmt.Sprintf("PGID=%s", currentUser.Gid))
-		} else {
-			fmt.Printf("Warning: Could not get current user info: %v. Container may run as root.\n", err)
+		// On Windows, os/user returns SID strings (not numeric IDs), and bind
+		// mounts of Windows paths have no real POSIX ownership to match anyway,
+		// so PUID/PGID would be meaningless (or break entrypoints expecting a number).
+		if goruntime.GOOS != "windows" {
+			if currentUser, err := user.Current(); err == nil {
+				runtimeArgs = append(runtimeArgs, "-e", fmt.Sprintf("PUID=%s", currentUser.Uid))
+				runtimeArgs = append(runtimeArgs, "-e", fmt.Sprintf("PGID=%s", currentUser.Gid))
+			} else {
+				fmt.Printf("Warning: Could not get current user info: %v. Container may run as root.\n", err)
+			}
 		}
 
 		appDataDir, err := db.GetDBPath()

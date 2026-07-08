@@ -371,6 +371,9 @@ var selfUpdateCmd = &cobra.Command{
 		fmt.Println("Updating...")
 
 		assetName := fmt.Sprintf("dp-%s-%s", runtime.GOOS, runtime.GOARCH)
+		if runtime.GOOS == "windows" {
+			assetName += ".exe"
+		}
 		url := fmt.Sprintf("https://github.com/AlessandroRuggiero/disguised-penguin/releases/latest/download/%s", assetName)
 		resp, err := http.Get(url)
 		if err != nil {
@@ -404,9 +407,30 @@ var selfUpdateCmd = &cobra.Command{
 		}
 		out.Close()
 
-		if err := os.Rename(tempFile, exePath); err != nil {
-			os.Remove(tempFile)
-			return fmt.Errorf("failed to update executable: %w (you might need elevated privileges)", err)
+		if runtime.GOOS == "windows" {
+			// Windows locks a running executable's file, so it can't be
+			// overwritten or renamed-over directly like on POSIX. Move it
+			// aside first, then move the new binary into place.
+			oldFile := exePath + ".old"
+			os.Remove(oldFile) // best-effort cleanup of a leftover from a previous update
+
+			if err := os.Rename(exePath, oldFile); err != nil {
+				os.Remove(tempFile)
+				return fmt.Errorf("failed to move current executable aside: %w (you might need elevated privileges)", err)
+			}
+			if err := os.Rename(tempFile, exePath); err != nil {
+				os.Rename(oldFile, exePath) // best-effort rollback
+				return fmt.Errorf("failed to update executable: %w (you might need elevated privileges)", err)
+			}
+			// The old binary is still locked by this running process; clean it
+			// up on a best-effort basis (it'll usually succeed once this
+			// process exits and Windows releases the handle on next run).
+			os.Remove(oldFile)
+		} else {
+			if err := os.Rename(tempFile, exePath); err != nil {
+				os.Remove(tempFile)
+				return fmt.Errorf("failed to update executable: %w (you might need elevated privileges)", err)
+			}
 		}
 
 		fmt.Printf("Successfully updated 'dp' to %s.\n", release.TagName)
