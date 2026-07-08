@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -369,7 +370,8 @@ var selfUpdateCmd = &cobra.Command{
 
 		fmt.Println("Updating...")
 
-		url := "https://github.com/AlessandroRuggiero/disguised-penguin/releases/latest/download/dp"
+		assetName := fmt.Sprintf("dp-%s-%s", runtime.GOOS, runtime.GOARCH)
+		url := fmt.Sprintf("https://github.com/AlessandroRuggiero/disguised-penguin/releases/latest/download/%s", assetName)
 		resp, err := http.Get(url)
 		if err != nil {
 			return fmt.Errorf("failed to download latest version: %w", err)
@@ -377,7 +379,7 @@ var selfUpdateCmd = &cobra.Command{
 		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("failed to download: HTTP %d", resp.StatusCode)
+			return fmt.Errorf("failed to download %s: HTTP %d (this platform may not have a published release binary)", assetName, resp.StatusCode)
 		}
 
 		exePath, err := os.Executable()

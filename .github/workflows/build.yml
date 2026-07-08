@@ -33,6 +33,12 @@ jobs:
       - name: Run tests
         run: make test
 
+      - name: Build release binaries
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          make dist
+          cp bin/dp-linux-amd64 bin/dp
+
       - name: Upload binary
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v4
@@ -44,5 +50,9 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: bin/dp
+          files: |
+            bin/dp
+            bin/dp-linux-amd64
+            bin/dp-darwin-amd64
+            bin/dp-darwin-arm64
           generate_release_notes: true
