@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,22 +20,33 @@ import (
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
+// goos is a var (rather than a direct runtime.GOOS reference) so tests can
+// override it to exercise OS-specific branches regardless of the host OS.
+var goos = runtime.GOOS
+
 type Store struct {
 	db     *sql.DB
 	dbPath string
 }
 
 func GetDBPath() (string, error) {
-	xdgDataHome := os.Getenv("XDG_DATA_HOME")
-	if xdgDataHome == "" {
+	dataHome := os.Getenv("XDG_DATA_HOME")
+	if dataHome == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return "", err
 		}
-		xdgDataHome = filepath.Join(home, ".local", "share")
+		if goos == "windows" {
+			dataHome = os.Getenv("LOCALAPPDATA")
+			if dataHome == "" {
+				dataHome = filepath.Join(home, "AppData", "Local")
+			}
+		} else {
+			dataHome = filepath.Join(home, ".local", "share")
+		}
 	}
 
-	appDir := filepath.Join(xdgDataHome, "disguised-penguin")
+	appDir := filepath.Join(dataHome, "disguised-penguin")
 	if err := os.MkdirAll(appDir, 0755); err != nil {
 		return "", err
 	}

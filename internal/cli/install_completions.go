@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -26,9 +27,15 @@ var installCompletionsCmd = &cobra.Command{
 		} else if strings.Contains(shell, "bash") {
 			rcPath := filepath.Join(home, ".bashrc")
 			return appendIfNotPresent(rcPath, "source <(dp completion bash)")
+		} else if runtime.GOOS == "windows" {
+			// Native cmd.exe/PowerShell sessions don't set $SHELL, so fall back
+			// to the current user's PowerShell profile (PowerShell 7+ path;
+			// Windows PowerShell 5.1 uses "WindowsPowerShell" instead).
+			profilePath := filepath.Join(home, "Documents", "PowerShell", "Microsoft.PowerShell_profile.ps1")
+			return appendIfNotPresent(profilePath, "dp completion powershell | Out-String | Invoke-Expression")
 		}
 
-		return fmt.Errorf("unsupported or unknown shell: %s. Supported shells are bash and zsh.", shell)
+		return fmt.Errorf("unsupported or unknown shell: %s. Supported shells are bash, zsh, and PowerShell (on Windows).", shell)
 	},
 }
 
@@ -38,7 +45,10 @@ func appendIfNotPresent(path, line string) error {
 		if !os.IsNotExist(err) {
 			return fmt.Errorf("failed to open %s: %w", path, err)
 		}
-		// If it does not exist, we'll just create it below
+		// If it does not exist, we'll just create it (and its parent dir) below
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			return fmt.Errorf("failed to create directory for %s: %w", path, err)
+		}
 	} else {
 		defer file.Close()
 		scanner := bufio.NewScanner(file)

@@ -27,6 +27,13 @@ curl -L -o ~/.local/bin/dp "https://github.com/AlessandroRuggiero/disguised-peng
 chmod +x ~/.local/bin/dp
 ```
 
+```powershell
+# Windows (PowerShell)
+New-Item -ItemType Directory -Force -Path "$env:LOCALAPPDATA\dp" | Out-Null
+Invoke-WebRequest -Uri "https://github.com/AlessandroRuggiero/disguised-penguin/releases/latest/download/dp-windows-amd64.exe" -OutFile "$env:LOCALAPPDATA\dp\dp.exe"
+# Add $env:LOCALAPPDATA\dp to your PATH (e.g. via System Properties > Environment Variables)
+```
+
 Remember to install completions: [see below](#enabling-autocompletion).
 
 ### Updating `dp`
@@ -61,7 +68,7 @@ To enable terminal autocompletion for `dp` commands and installed containerized 
 dp install-completions
 ```
 
-This will automatically add the completion script source command to your `~/.bashrc` or `~/.zshrc`. Restart your shell or open a new terminal for it to take effect.
+This will automatically add the completion script source command to your `~/.bashrc` or `~/.zshrc` (or, on Windows, your PowerShell profile). Restart your shell or open a new terminal for it to take effect.
 
 ## Usage
 
@@ -213,9 +220,9 @@ dp registry visit new-registry-name
 
 ## How It Works
 
-Disguised Penguin maintains a local SQLite database (`~/.local/share/disguised-penguin/data.db`) storing CLI configurations, registries, and workspaces. On startup, `dp` automatically applies embedded database migrations (and will create/seed the DB on first run, including a `default` registry and a `default` workspace).
+Disguised Penguin maintains a local SQLite database (`~/.local/share/disguised-penguin/data.db` on Linux/macOS, `%LOCALAPPDATA%\disguised-penguin\data.db` on Windows) storing CLI configurations, registries, and workspaces. On startup, `dp` automatically applies embedded database migrations (and will create/seed the DB on first run, including a `default` registry and a `default` workspace).
 
-Workspace state is stored under `~/.local/share/disguised-penguin/workspaces/<workspace>/` (with per-CLI persistent volumes under `.../volumes/<cli>/`).
+Workspace state is stored alongside the database under a `workspaces/<workspace>/` directory (with per-CLI persistent volumes under `.../volumes/<cli>/`).
 
 When you run a CLI, it spawns a container with:
 
@@ -224,8 +231,8 @@ When you run a CLI, it spawns a container with:
 - Port mappings exposed as specified
 
 ## Requirements
-- Platforms: Linux (amd64) and macOS (amd64/arm64)
-- To run `dp` (release binary): Docker or Podman (available in `PATH`), on macOS, Docker Desktop or Podman Desktop/`podman machine`
+- Platforms: Linux (amd64), macOS (amd64/arm64), and Windows (amd64)
+- To run `dp` (release binary): Docker or Podman (available in `PATH`), on macOS/Windows, Docker Desktop or Podman Desktop/`podman machine`
 - To build from source: Go 1.25+
 
 ## License

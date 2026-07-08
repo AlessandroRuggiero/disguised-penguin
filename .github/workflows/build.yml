@@ -55,4 +55,5 @@ jobs:
             bin/dp-linux-amd64
             bin/dp-darwin-amd64
             bin/dp-darwin-arm64
+            bin/dp-windows-amd64.exe
           generate_release_notes: true
