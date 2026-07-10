@@ -138,6 +138,18 @@ var rootCmd = &cobra.Command{
 			} else {
 				fmt.Printf("Warning: Could not get current user info: %v. Container may run as root.\n", err)
 			}
+
+			// Rootless podman remaps container UIDs through /etc/subuid, so the
+			// PUID/PGID dance above would drop privileges onto a subordinate UID
+			// that doesn't own the bind-mounted host files. --userns=keep-id maps
+			// the invoking user 1:1 into the container so the dropped-to user lines
+			// up with the host owner, and --user=0 keeps the entrypoint starting as
+			// root so it can still run usermod/chown before dropping privileges.
+			// Docker doesn't understand keep-id, and rootful podman rejects it, so
+			// this is gated to rootless podman only.
+			if runtime == container.RuntimePodman && os.Geteuid() != 0 {
+				runtimeArgs = append(runtimeArgs, "--userns=keep-id", "--user=0")
+			}
 		}
 
 		appDataDir, err := db.GetDBPath()
