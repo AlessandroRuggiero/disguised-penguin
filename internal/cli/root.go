@@ -92,6 +92,14 @@ var rootCmd = &cobra.Command{
 			} else if strings.HasPrefix(cliArgs[0], "--runtime=") {
 				runtimeRequested = strings.TrimPrefix(cliArgs[0], "--runtime=")
 				cliArgs = cliArgs[1:]
+			} else if cliArgs[0] == "-v" || cliArgs[0] == "--version" {
+				// DisableFlagParsing means cobra won't handle these itself; do it
+				// here while we're still in the command position (before a cli name
+				// is resolved), so "dp <tool> --version" still passes through to the tool.
+				fmt.Printf("dp version %s\n", Version)
+				return nil
+			} else if cliArgs[0] == "-h" || cliArgs[0] == "--help" {
+				return cmd.Help()
 			} else {
 				break
 			}
@@ -126,7 +134,21 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 
-		runtimeArgs := []string{"run", "--rm", "-it", "-v", fmt.Sprintf("%s:/workspace", cwd), "-w", "/workspace"}
+		// On SELinux-enforcing hosts (Fedora/RHEL and family, the common podman
+		// platforms) the container's confined type cannot access host files that
+		// carry their original labels, so bind mounts get "Permission denied" even
+		// when the UID/GID is correct. The ":z" suffix asks the runtime to relabel
+		// the mounted path to a shared container-accessible type. We use ":z"
+		// (shared), not ":Z" (private/exclusive), because the workspace is the
+		// user's cwd and a private relabel could break other tools' access to it.
+		// The suffix is only added when SELinux is actually active, so non-SELinux
+		// hosts (Ubuntu/Debian, macOS, Windows) are left untouched.
+		mountSuffix := ""
+		if container.SELinuxEnabled() {
+			mountSuffix = ":z"
+		}
+
+		runtimeArgs := []string{"run", "--rm", "-it", "-v", fmt.Sprintf("%s:/workspace%s", cwd, mountSuffix), "-w", "/workspace"}
 
 		// On Windows, os/user returns SID strings (not numeric IDs), and bind
 		// mounts of Windows paths have no real POSIX ownership to match anyway,
@@ -163,7 +185,7 @@ var rootCmd = &cobra.Command{
 			if err := os.MkdirAll(hostVolumePath, 0755); err != nil {
 				return fmt.Errorf("failed to create host volume directory: %w", err)
 			}
-			runtimeArgs = append(runtimeArgs, "-v", fmt.Sprintf("%s:%s", hostVolumePath, containerPath))
+			runtimeArgs = append(runtimeArgs, "-v", fmt.Sprintf("%s:%s%s", hostVolumePath, containerPath, mountSuffix))
 		}
 
 		for hostPort, containerPort := range cli.PortMappings {

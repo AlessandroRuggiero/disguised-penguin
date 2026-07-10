@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	goruntime "runtime"
 	"strings"
 )
 
@@ -19,6 +20,14 @@ const (
 const EnvContainerRuntime = "DP_CONTAINER_RUNTIME"
 
 var lookPath = exec.LookPath
+
+func SELinuxEnabled() bool {
+	if goruntime.GOOS != "linux" {
+		return false
+	}
+	_, err := os.Stat("/sys/fs/selinux/enforce")
+	return err == nil
+}
 
 func ResolveRuntime(requested string) (Runtime, error) {
 	req := strings.TrimSpace(strings.ToLower(requested))
