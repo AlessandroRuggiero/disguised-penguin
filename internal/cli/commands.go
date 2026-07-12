@@ -4,6 +4,7 @@ import (
 	"disguised-penguin/internal/container"
 	"disguised-penguin/internal/models"
 	"disguised-penguin/internal/remote"
+	"disguised-penguin/internal/workspace"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -76,15 +77,55 @@ var rmCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		rowsAffected, err := store.RemoveCLI(name)
+
+		clis, err := store.ListCLIs()
 		if err != nil {
+			return fmt.Errorf("failed to list CLIs: %w", err)
+		}
+
+		var containerName string
+		found := false
+		sharedByOthers := false
+		for _, c := range clis {
+			if c.Name == name {
+				containerName = c.ContainerName
+				found = true
+			}
+		}
+		if !found {
+			fmt.Printf("No CLI found with name '%s'\n", name)
+			return nil
+		}
+		for _, c := range clis {
+			if c.Name != name && c.ContainerName == containerName {
+				sharedByOthers = true
+				break
+			}
+		}
+
+		if _, err := store.RemoveCLI(name); err != nil {
 			return fmt.Errorf("failed to delete CLI from db: %w", err)
 		}
-		if rowsAffected == 0 {
-			fmt.Printf("No CLI found with name '%s'\n", name)
-		} else {
-			fmt.Printf("Successfully removed CLI '%s'\n", name)
+		fmt.Printf("Successfully removed CLI '%s'\n", name)
+
+		if sharedByOthers {
+			fmt.Printf("Image '%s' is still used by another CLI, leaving it in place.\n", containerName)
+			return nil
 		}
+
+		runtime, err := container.ResolveRuntime(containerRuntimeFlag)
+		if err != nil {
+			fmt.Printf("Warning: could not resolve a container runtime to remove image '%s': %v\n", containerName, err)
+			return nil
+		}
+		runtimeCmd := exec.Command(string(runtime), "rmi", containerName)
+		runtimeCmd.Stdout = os.Stdout
+		runtimeCmd.Stderr = os.Stderr
+		if err := runtimeCmd.Run(); err != nil {
+			fmt.Printf("Warning: failed to remove image '%s': %v\n", containerName, err)
+			return nil
+		}
+		fmt.Printf("Successfully removed image '%s'\n", containerName)
 		return nil
 	},
 }
@@ -552,15 +593,88 @@ var workspaceRemoveCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
+		if name == "default" {
+			return fmt.Errorf("cannot remove the 'default' workspace")
+		}
+
 		ok, err := store.RemoveWorkspace(name)
 		if err != nil {
 			return fmt.Errorf("failed to remove workspace: %w", err)
 		}
 		if !ok {
 			fmt.Printf("No workspace found with name '%s'\n", name)
-		} else {
-			fmt.Printf("Successfully removed workspace '%s'\n", name)
+			return nil
 		}
+
+		ws, err := workspace.Get(name)
+		if err != nil {
+			return fmt.Errorf("failed to resolve workspace '%s': %w", name, err)
+		}
+		if err := ws.Delete(); err != nil {
+			return fmt.Errorf("failed to delete on-disk data for workspace '%s': %w", name, err)
+		}
+
+		fmt.Printf("Successfully removed workspace '%s' and its on-disk data\n", name)
+		return nil
+	},
+}
+
+var workspaceCleanCmd = &cobra.Command{
+	Use:     "clean [workspace] [cli]",
+	Aliases: []string{"c"},
+	Short:   "Delete a single CLI's on-disk data from a workspace",
+	Args:    cobra.ExactArgs(2),
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		switch len(args) {
+		case 0:
+			workspaces, err := store.ListWorkspaces()
+			if err != nil {
+				return nil, cobra.ShellCompDirectiveError
+			}
+			var names []string
+			for _, w := range workspaces {
+				names = append(names, w.Name)
+			}
+			return names, cobra.ShellCompDirectiveNoFileComp
+		case 1:
+			clis, err := store.ListCLIs()
+			if err != nil {
+				return nil, cobra.ShellCompDirectiveError
+			}
+			var names []string
+			for _, c := range clis {
+				names = append(names, c.Name)
+			}
+			return names, cobra.ShellCompDirectiveNoFileComp
+		default:
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		workspaceName := args[0]
+		cliName := args[1]
+
+		if _, exists, err := store.GetWorkspaceByName(workspaceName); err != nil {
+			return fmt.Errorf("failed to look up workspace '%s': %w", workspaceName, err)
+		} else if !exists {
+			return fmt.Errorf("workspace '%s' not found", workspaceName)
+		}
+
+		ws, err := workspace.Get(workspaceName)
+		if err != nil {
+			return fmt.Errorf("failed to resolve workspace '%s': %w", workspaceName, err)
+		}
+
+		if _, err := os.Stat(ws.CLIDir(cliName)); os.IsNotExist(err) {
+			fmt.Printf("No data found for CLI '%s' in workspace '%s'\n", cliName, workspaceName)
+			return nil
+		}
+
+		if err := ws.DeleteCLI(cliName); err != nil {
+			return fmt.Errorf("failed to delete data for CLI '%s' in workspace '%s': %w", cliName, workspaceName, err)
+		}
+
+		fmt.Printf("Successfully deleted data for CLI '%s' in workspace '%s'\n", cliName, workspaceName)
 		return nil
 	},
 }
