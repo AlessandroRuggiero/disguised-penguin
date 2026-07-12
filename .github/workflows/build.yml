@@ -57,3 +57,4 @@ jobs:
             bin/dp-darwin-arm64
             bin/dp-windows-amd64.exe
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
