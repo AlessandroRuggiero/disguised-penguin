@@ -121,6 +121,11 @@ dp update <name>
 ```
 Updates the CLI package locally by pulling the latest mapped container image.
 
+```bash
+dp update
+```
+Updates every installed CLI. Failures for individual CLIs are reported but don't stop the rest from updating.
+
 ### Update `dp` itself
 
 ```bash
