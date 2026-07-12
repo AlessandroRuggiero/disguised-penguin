@@ -283,11 +283,41 @@ var registryRemoveCmd = &cobra.Command{
 	},
 }
 
+func updateOne(name string, runtime container.Runtime) error {
+	pkgToUpdate, exists, err := store.SearchRemotePackageByName(name)
+	if err != nil {
+		return fmt.Errorf("failed to search remote package: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("package '%s' not found in any remote registry", name)
+	}
+
+	fmt.Printf("Pulling latest image '%s' for CLI '%s' using %s...\n", pkgToUpdate.Container, name, runtime)
+	runtimeCmd := exec.Command(string(runtime), "pull", pkgToUpdate.Container)
+	runtimeCmd.Stdout = os.Stdout
+	runtimeCmd.Stderr = os.Stderr
+
+	if err := runtimeCmd.Run(); err != nil {
+		return fmt.Errorf("failed to pull image with %s: %w", runtime, err)
+	}
+	fmt.Printf("Successfully pulled latest image '%s'\n", pkgToUpdate.Container)
+
+	printKeyValueSection("Config mounts", pkgToUpdate.ConfigMounts)
+	printKeyValueSection("Port mappings", pkgToUpdate.PortMappings)
+
+	if err := store.UpdateCLI(name, pkgToUpdate); err != nil {
+		return fmt.Errorf("failed to update CLI in db: %w", err)
+	}
+
+	return nil
+}
+
 var updateCmd = &cobra.Command{
 	Use:     "update [name]",
 	Aliases: []string{"u"},
 	Short:   "Update a CLI configuration by pulling the latest container image",
-	Args:    cobra.ExactArgs(1),
+	Long:    "Update a CLI configuration by pulling the latest container image.\nIf no name is given, every installed CLI is updated.",
+	Args:    cobra.MaximumNArgs(1),
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if len(args) != 0 {
 			return nil, cobra.ShellCompDirectiveNoFileComp
@@ -303,36 +333,39 @@ var updateCmd = &cobra.Command{
 		return names, cobra.ShellCompDirectiveNoFileComp
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		name := args[0]
 		runtime, err := container.ResolveRuntime(containerRuntimeFlag)
 		if err != nil {
 			return err
 		}
-		pkgToUpdate, exists, err := store.SearchRemotePackageByName(name)
+
+		if len(args) == 1 {
+			return updateOne(args[0], runtime)
+		}
+
+		clis, err := store.ListCLIs()
 		if err != nil {
-			return fmt.Errorf("failed to search remote package: %w", err)
+			return fmt.Errorf("failed to list CLIs: %w", err)
 		}
-		if !exists {
-			return fmt.Errorf("package '%s' not found in any remote registry", name)
-		}
-
-		fmt.Printf("Pulling latest image '%s' for CLI '%s' using %s...\n", pkgToUpdate.Container, name, runtime)
-		runtimeCmd := exec.Command(string(runtime), "pull", pkgToUpdate.Container)
-		runtimeCmd.Stdout = os.Stdout
-		runtimeCmd.Stderr = os.Stderr
-
-		if err := runtimeCmd.Run(); err != nil {
-			return fmt.Errorf("failed to pull image with %s: %w", runtime, err)
-		}
-		fmt.Printf("Successfully pulled latest image '%s'\n", pkgToUpdate.Container)
-
-		printKeyValueSection("Config mounts", pkgToUpdate.ConfigMounts)
-		printKeyValueSection("Port mappings", pkgToUpdate.PortMappings)
-
-		if err := store.UpdateCLI(name, pkgToUpdate); err != nil {
-			return fmt.Errorf("failed to update CLI in db: %w", err)
+		if len(clis) == 0 {
+			fmt.Println("No CLIs installed.")
+			return nil
 		}
 
+		var failed []string
+		for i, c := range clis {
+			fmt.Printf("[%d/%d] Updating '%s'...\n", i+1, len(clis), c.Name)
+			if err := updateOne(c.Name, runtime); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to update '%s': %v\n", c.Name, err)
+				failed = append(failed, c.Name)
+			}
+			fmt.Println()
+		}
+
+		succeeded := len(clis) - len(failed)
+		fmt.Printf("Updated %d/%d CLIs.\n", succeeded, len(clis))
+		if len(failed) > 0 {
+			return fmt.Errorf("failed to update: %s", strings.Join(failed, ", "))
+		}
 		return nil
 	},
 }
