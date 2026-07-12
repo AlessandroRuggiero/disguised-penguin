@@ -6,13 +6,13 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
-	"path/filepath"
 	goruntime "runtime"
 	"strings"
 
 	"disguised-penguin/internal/container"
 	"disguised-penguin/internal/db"
 	"disguised-penguin/internal/remote"
+	"disguised-penguin/internal/workspace"
 
 	"github.com/spf13/cobra"
 )
@@ -71,13 +71,13 @@ var rootCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var cliArgs []string = args
-		workspace := "default"
+		workspaceName := "default"
 		runtimeRequested := containerRuntimeFlag
 
 		for len(cliArgs) > 0 {
 			if cliArgs[0] == "-w" || cliArgs[0] == "--workspace" {
 				if len(cliArgs) > 1 {
-					workspace = cliArgs[1]
+					workspaceName = cliArgs[1]
 					cliArgs = cliArgs[2:]
 				} else {
 					return fmt.Errorf("flag needs an argument: '%s'", cliArgs[0])
@@ -122,6 +122,12 @@ var rootCmd = &cobra.Command{
 				suggestion_text = fmt.Sprintf("\nDid you mean one of these?\n  %s", strings.Join(suggestions, "\n  "))
 			}
 			return fmt.Errorf("CLI %s is not installed%s\n", cliName, suggestion_text)
+		}
+
+		if _, exists, err := store.GetWorkspaceByName(workspaceName); err != nil {
+			return fmt.Errorf("failed to look up workspace '%s': %w", workspaceName, err)
+		} else if !exists {
+			return fmt.Errorf("workspace '%s' not found (create it with 'dp workspace add %s')", workspaceName, workspaceName)
 		}
 
 		cwd, err := os.Getwd()
@@ -174,14 +180,13 @@ var rootCmd = &cobra.Command{
 			}
 		}
 
-		appDataDir, err := db.GetDBPath()
+		ws, err := workspace.Get(workspaceName)
 		if err != nil {
-			return fmt.Errorf("failed to get app data dir: %w", err)
+			return fmt.Errorf("failed to resolve workspace '%s': %w", workspaceName, err)
 		}
-		volumesDir := filepath.Join(filepath.Dir(appDataDir), "workspaces", workspace, "volumes", cli.Name)
 
 		for volumeName, containerPath := range cli.ConfigMounts {
-			hostVolumePath := filepath.Join(volumesDir, volumeName)
+			hostVolumePath := ws.VolumeDir(cli.Name, volumeName)
 			if err := os.MkdirAll(hostVolumePath, 0755); err != nil {
 				return fmt.Errorf("failed to create host volume directory: %w", err)
 			}
@@ -233,5 +238,6 @@ func init() {
 	rootCmd.AddCommand(workspaceCmd)
 	workspaceCmd.AddCommand(workspaceAddCmd)
 	workspaceCmd.AddCommand(workspaceRemoveCmd)
+	workspaceCmd.AddCommand(workspaceCleanCmd)
 	workspaceCmd.AddCommand(workspaceListCmd)
 }
