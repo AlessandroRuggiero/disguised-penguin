@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path"
+	"path/filepath"
 	goruntime "runtime"
 	"strings"
 
@@ -73,6 +75,7 @@ var rootCmd = &cobra.Command{
 		var cliArgs []string = args
 		workspaceName := "default"
 		runtimeRequested := containerRuntimeFlag
+		var mpSpecs []string
 
 		for len(cliArgs) > 0 {
 			if cliArgs[0] == "-w" || cliArgs[0] == "--workspace" {
@@ -82,6 +85,16 @@ var rootCmd = &cobra.Command{
 				} else {
 					return fmt.Errorf("flag needs an argument: '%s'", cliArgs[0])
 				}
+			} else if cliArgs[0] == "--mp" {
+				if len(cliArgs) > 1 {
+					mpSpecs = append(mpSpecs, cliArgs[1])
+					cliArgs = cliArgs[2:]
+				} else {
+					return fmt.Errorf("flag needs an argument: '%s'", cliArgs[0])
+				}
+			} else if strings.HasPrefix(cliArgs[0], "--mp=") {
+				mpSpecs = append(mpSpecs, strings.TrimPrefix(cliArgs[0], "--mp="))
+				cliArgs = cliArgs[1:]
 			} else if cliArgs[0] == "--runtime" {
 				if len(cliArgs) > 1 {
 					runtimeRequested = cliArgs[1]
@@ -149,10 +162,8 @@ var rootCmd = &cobra.Command{
 		// user's cwd and a private relabel could break other tools' access to it.
 		// The suffix is only added when SELinux is actually active, so non-SELinux
 		// hosts (Ubuntu/Debian, macOS, Windows) are left untouched.
-		mountSuffix := ""
-		if container.SELinuxEnabled() {
-			mountSuffix = ":z"
-		}
+		selinux := container.SELinuxEnabled()
+		mountSuffix := container.MountOpts("", selinux)
 
 		runtimeArgs := []string{"run", "--rm", "-it", "-v", fmt.Sprintf("%s:/workspace%s", cwd, mountSuffix), "-w", "/workspace"}
 
@@ -191,6 +202,38 @@ var rootCmd = &cobra.Command{
 				return fmt.Errorf("failed to create host volume directory: %w", err)
 			}
 			runtimeArgs = append(runtimeArgs, "-v", fmt.Sprintf("%s:%s%s", hostVolumePath, containerPath, mountSuffix))
+		}
+
+		// Mount protections (--mp PATH:MODE) overlay a nested mount on top of the
+		// /workspace bind so a subpath can be made read-only, writable, or hidden
+		// (shadowed by an empty mount). The runtime mounts by destination depth, so
+		// these always shadow the broader /workspace mount regardless of arg order.
+		hides := container.NewHidePlaceholders()
+		defer hides.Cleanup()
+		for _, spec := range mpSpecs {
+			prot, err := container.ParseProtection(spec)
+			if err != nil {
+				return err
+			}
+			hostPath := filepath.Join(cwd, prot.Rel)
+			info, err := os.Stat(hostPath)
+			if err != nil {
+				return fmt.Errorf("mount protection %q: cannot access %s: %w", spec, prot.Rel, err)
+			}
+			dest := path.Join("/workspace", filepath.ToSlash(prot.Rel))
+
+			switch prot.Mode {
+			case "ro", "rw":
+				runtimeArgs = append(runtimeArgs, "-v", hostPath+":"+dest+container.MountOpts(prot.Mode, selinux))
+			case "h":
+				// Hide = shadow with an empty, read-only mount so the tool sees
+				// nothing (a present-but-empty path; a bind can't truly unlink it).
+				empty, err := hides.Get(info.IsDir())
+				if err != nil {
+					return fmt.Errorf("mount protection %q: %w", spec, err)
+				}
+				runtimeArgs = append(runtimeArgs, "-v", empty+":"+dest+container.MountOpts("ro", selinux))
+			}
 		}
 
 		for hostPort, containerPort := range cli.PortMappings {
