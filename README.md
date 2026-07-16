@@ -194,6 +194,39 @@ dp workspace add google-account-2
 # start the CLI in the second workspace (google-account-2)
 dp -w google-account-2 gemini
 ```
+### Protect Paths Within a Workspace
+
+Your working directory is mounted read-write into the container by default. Mount protections let you lock down individual paths (relative to the workspace root) so a tool can't tamper with them. Each protection has a mode:
+
+- `ro`: read-only (the tool can read the path but not modify it)
+- `rw`: read-write (used to re-open a path that a broader protection covers)
+- `h`: hidden (shadowed by an empty mount, so the tool sees nothing there)
+
+Protections are stored per-workspace and applied automatically every time you run a CLI in that workspace.
+
+```bash
+# Protect a path in a workspace (PATH:MODE)
+dp workspace protection add <workspace> <path>:<mode>
+
+# List protections for a workspace
+dp workspace protection list <workspace>
+
+# Remove a protection
+dp workspace protection remove <workspace> <path>
+```
+
+For example, to keep an AI agent out of your git history and secrets in the `default` workspace:
+
+```bash
+dp workspace protection add default .git:ro
+dp workspace protection add default .env:h
+```
+
+To apply a protection for a single run instead of persisting it, use the `--mp` flag (repeatable) *before* the CLI name, just like `-w`:
+
+```bash
+dp --mp .git:ro --mp .env:h <cli-name> [args...]
+```
 ### Database Management
 
 ```bash

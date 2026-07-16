@@ -39,6 +39,13 @@ type Workspace struct {
 	Name string
 }
 
+type MountProtection struct {
+	ID          int
+	WorkspaceID int
+	MountPath   string
+	Permission  string
+}
+
 func MakeRegistryType(s string) (RegistryType, error) {
 	switch s {
 	case "github":
@@ -46,4 +53,12 @@ func MakeRegistryType(s string) (RegistryType, error) {
 	default:
 		return "", fmt.Errorf("invalid registry type: %s", s)
 	}
+}
+
+func (rt RegistryType) String() string {
+	return string(rt)
+}
+
+func (mp MountProtection) String() string {
+	return fmt.Sprintf("%s:%s", mp.MountPath, mp.Permission)
 }

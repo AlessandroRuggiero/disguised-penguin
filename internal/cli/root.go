@@ -137,7 +137,9 @@ var rootCmd = &cobra.Command{
 			return fmt.Errorf("CLI %s is not installed%s\n", cliName, suggestion_text)
 		}
 
-		if _, exists, err := store.GetWorkspaceByName(workspaceName); err != nil {
+		dbWorkspace, exists, err := store.GetWorkspaceByName(workspaceName)
+
+		if err != nil {
 			return fmt.Errorf("failed to look up workspace '%s': %w", workspaceName, err)
 		} else if !exists {
 			return fmt.Errorf("workspace '%s' not found (create it with 'dp workspace add %s')", workspaceName, workspaceName)
@@ -210,6 +212,18 @@ var rootCmd = &cobra.Command{
 		// these always shadow the broader /workspace mount regardless of arg order.
 		hides := container.NewHidePlaceholders()
 		defer hides.Cleanup()
+
+		// Add workspace-level mount protections from the database, so they apply to all CLIs in the workspace.
+		workspaceProtections, err := store.GetMountProtections(dbWorkspace.ID)
+		if err != nil {
+			return fmt.Errorf("failed to get mount protections: %w", err)
+		}
+		workspaceProtSpecs := make([]string, len(workspaceProtections))
+		for i, prot := range workspaceProtections {
+			workspaceProtSpecs[i] = prot.String()
+		}
+		// Workspace-level mount protections are applied first, so CLI-level mount protections can override them if needed.
+		mpSpecs = append(mpSpecs, workspaceProtSpecs...)
 		for _, spec := range mpSpecs {
 			prot, err := container.ParseProtection(spec)
 			if err != nil {
@@ -283,4 +297,9 @@ func init() {
 	workspaceCmd.AddCommand(workspaceRemoveCmd)
 	workspaceCmd.AddCommand(workspaceCleanCmd)
 	workspaceCmd.AddCommand(workspaceListCmd)
+
+	workspaceCmd.AddCommand(workspaceProtectionCmd)
+	workspaceProtectionCmd.AddCommand(workspaceProtectionAddCmd)
+	workspaceProtectionCmd.AddCommand(workspaceProtectionRemoveCmd)
+	workspaceProtectionCmd.AddCommand(workspaceProtectionListCmd)
 }

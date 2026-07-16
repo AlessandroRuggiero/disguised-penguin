@@ -60,7 +60,7 @@ func NewStore() (*Store, error) {
 		return nil, fmt.Errorf("could not get DB path: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=foreign_keys(1)")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open DB: %w", err)
 	}
@@ -333,4 +333,46 @@ func (s *Store) ListWorkspaces() ([]models.Workspace, error) {
 		workspaces = append(workspaces, ws)
 	}
 	return workspaces, nil
+}
+
+func (s *Store) GetMountProtections(workspaceID int) ([]models.MountProtection, error) {
+	rows, err := s.db.Query(`SELECT id, workspace_id, mount_path, permission FROM mount_protection WHERE workspace_id = ?`, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query mount protections: %w", err)
+	}
+	defer rows.Close()
+
+	var protections []models.MountProtection
+	for rows.Next() {
+		var mp models.MountProtection
+		if err := rows.Scan(&mp.ID, &mp.WorkspaceID, &mp.MountPath, &mp.Permission); err != nil {
+			return nil, fmt.Errorf("failed to scan mount protection row: %w", err)
+		}
+		protections = append(protections, mp)
+	}
+	return protections, nil
+}
+
+// AddMountProtection records a protection for a path within a workspace.
+// Re-protecting an existing path updates its permission (the workspace_id +
+// mount_path pair is unique), so callers can change a mode without removing first.
+func (s *Store) AddMountProtection(workspaceID int, mountPath, permission string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO mount_protection (workspace_id, mount_path, permission) VALUES (?, ?, ?)
+		 ON CONFLICT(workspace_id, mount_path) DO UPDATE SET permission = excluded.permission`,
+		workspaceID, mountPath, permission,
+	)
+	return err
+}
+
+func (s *Store) RemoveMountProtection(workspaceID int, mountPath string) (bool, error) {
+	result, err := s.db.Exec(`DELETE FROM mount_protection WHERE workspace_id = ? AND mount_path = ?`, workspaceID, mountPath)
+	if err != nil {
+		return false, err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rowsAffected > 0, nil
 }

@@ -14,6 +14,10 @@ type MountProtection struct {
 	Mode string
 }
 
+func (mp MountProtection) String() string {
+	return fmt.Sprintf("%s:%s", mp.Rel, mp.Mode)
+}
+
 // ParseProtection parses a "--mp PATH:MODE" spec, validating the mode and
 // confining the path to the workspace (no absolute paths or ".." escapes).
 func ParseProtection(spec string) (MountProtection, error) {

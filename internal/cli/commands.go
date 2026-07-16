@@ -700,3 +700,163 @@ var workspaceListCmd = &cobra.Command{
 		return nil
 	},
 }
+
+var workspaceProtectionCmd = &cobra.Command{
+	Use:     "protection",
+	Aliases: []string{"prot"},
+	Short:   "Manage mount protections for a workspace",
+	Long:    "Manage mount protections for a workspace.\nA protection remounts a path within the workspace read-only (ro), writable (rw), or hidden (h) whenever a CLI runs against that workspace.",
+}
+
+var workspaceProtectionAddCmd = &cobra.Command{
+	Use:     "add [workspace] [path:mode]",
+	Aliases: []string{"a"},
+	Short:   "Protect a path within a workspace (mode: ro, rw, or h)",
+	Long:    "Protect a path within a workspace so it is remounted read-only (ro), writable (rw), or hidden (h) whenever a CLI runs against that workspace.\nThe path is relative to the workspace root. Re-adding an existing path updates its mode.",
+	Example: `  dp workspace protection add default .git:ro
+  dp ws protection add dev .env:h`,
+	Args: cobra.ExactArgs(2),
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) != 0 {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		workspaces, err := store.ListWorkspaces()
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveError
+		}
+		var names []string
+		for _, w := range workspaces {
+			names = append(names, w.Name)
+		}
+		return names, cobra.ShellCompDirectiveNoFileComp
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		workspaceName := args[0]
+
+		prot, err := container.ParseProtection(args[1])
+		if err != nil {
+			return err
+		}
+
+		ws, exists, err := store.GetWorkspaceByName(workspaceName)
+		if err != nil {
+			return fmt.Errorf("failed to look up workspace '%s': %w", workspaceName, err)
+		} else if !exists {
+			return fmt.Errorf("workspace '%s' not found (create it with 'dp workspace add %s')", workspaceName, workspaceName)
+		}
+
+		if err := store.AddMountProtection(ws.ID, prot.Rel, prot.Mode); err != nil {
+			return fmt.Errorf("failed to add mount protection: %w", err)
+		}
+		fmt.Printf("Protected '%s' as '%s' in workspace '%s'\n", prot.Rel, prot.Mode, workspaceName)
+		return nil
+	},
+}
+
+var workspaceProtectionRemoveCmd = &cobra.Command{
+	Use:     "remove [workspace] [path]",
+	Aliases: []string{"rm", "r"},
+	Short:   "Remove a mount protection from a workspace",
+	Example: `  dp workspace protection remove default .git
+  dp ws protection rm dev .env`,
+	Args: cobra.ExactArgs(2),
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		switch len(args) {
+		case 0:
+			workspaces, err := store.ListWorkspaces()
+			if err != nil {
+				return nil, cobra.ShellCompDirectiveError
+			}
+			var names []string
+			for _, w := range workspaces {
+				names = append(names, w.Name)
+			}
+			return names, cobra.ShellCompDirectiveNoFileComp
+		case 1:
+			ws, exists, err := store.GetWorkspaceByName(args[0])
+			if err != nil || !exists {
+				return nil, cobra.ShellCompDirectiveError
+			}
+			protections, err := store.GetMountProtections(ws.ID)
+			if err != nil {
+				return nil, cobra.ShellCompDirectiveError
+			}
+			var paths []string
+			for _, p := range protections {
+				paths = append(paths, p.MountPath)
+			}
+			return paths, cobra.ShellCompDirectiveNoFileComp
+		default:
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		workspaceName := args[0]
+		// Clean the path the same way ParseProtection stored it, so ".git",
+		// "./.git" and ".git/" all match the recorded protection.
+		mountPath := filepath.Clean(args[1])
+
+		ws, exists, err := store.GetWorkspaceByName(workspaceName)
+		if err != nil {
+			return fmt.Errorf("failed to look up workspace '%s': %w", workspaceName, err)
+		} else if !exists {
+			return fmt.Errorf("workspace '%s' not found", workspaceName)
+		}
+
+		removed, err := store.RemoveMountProtection(ws.ID, mountPath)
+		if err != nil {
+			return fmt.Errorf("failed to remove mount protection: %w", err)
+		}
+		if !removed {
+			fmt.Printf("No protection found for '%s' in workspace '%s'\n", mountPath, workspaceName)
+			return nil
+		}
+		fmt.Printf("Removed protection for '%s' in workspace '%s'\n", mountPath, workspaceName)
+		return nil
+	},
+}
+
+var workspaceProtectionListCmd = &cobra.Command{
+	Use:     "list [workspace]",
+	Aliases: []string{"ls"},
+	Short:   "List mount protections for a workspace",
+	Args:    cobra.ExactArgs(1),
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) != 0 {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		workspaces, err := store.ListWorkspaces()
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveError
+		}
+		var names []string
+		for _, w := range workspaces {
+			names = append(names, w.Name)
+		}
+		return names, cobra.ShellCompDirectiveNoFileComp
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		workspaceName := args[0]
+
+		ws, exists, err := store.GetWorkspaceByName(workspaceName)
+		if err != nil {
+			return fmt.Errorf("failed to look up workspace '%s': %w", workspaceName, err)
+		} else if !exists {
+			return fmt.Errorf("workspace '%s' not found", workspaceName)
+		}
+
+		protections, err := store.GetMountProtections(ws.ID)
+		if err != nil {
+			return fmt.Errorf("failed to get mount protections: %w", err)
+		}
+		if len(protections) == 0 {
+			fmt.Printf("No protections set for workspace '%s'\n", workspaceName)
+			return nil
+		}
+		fmt.Printf("Protections in workspace '%s':\n", workspaceName)
+		for _, p := range protections {
+			fmt.Printf("- %s -> %s\n", p.MountPath, p.Permission)
+		}
+		return nil
+	},
+}
