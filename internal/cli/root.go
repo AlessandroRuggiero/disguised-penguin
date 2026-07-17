@@ -210,8 +210,11 @@ var rootCmd = &cobra.Command{
 		// /workspace bind so a subpath can be made read-only, writable, or hidden
 		// (shadowed by an empty mount). The runtime mounts by destination depth, so
 		// these always shadow the broader /workspace mount regardless of arg order.
-		hides := container.NewHidePlaceholders()
-		defer hides.Cleanup()
+		dbPath, err := db.GetDBPath()
+		if err != nil {
+			return fmt.Errorf("failed to resolve data directory: %w", err)
+		}
+		hides := container.NewHidePlaceholders(filepath.Join(filepath.Dir(dbPath), "placeholders"))
 
 		// Add workspace-level mount protections from the database, so they apply to all CLIs in the workspace.
 		workspaceProtections, err := store.GetMountProtections(dbWorkspace.ID)
@@ -231,8 +234,16 @@ var rootCmd = &cobra.Command{
 			}
 			hostPath := filepath.Join(cwd, prot.Rel)
 			info, err := os.Stat(hostPath)
-			if err != nil {
+			missing := os.IsNotExist(err)
+			if err != nil && !missing {
 				return fmt.Errorf("mount protection %q: cannot access %s: %w", spec, prot.Rel, err)
+			}
+			// Every mode binds onto an existing mountpoint, so the path must
+			// exist on the host. Hiding a not-yet-created path would force the
+			// runtime to create a nested mountpoint, which Docker Desktop's
+			// virtiofs rejects ("outside of rootfs").
+			if missing {
+				continue
 			}
 			dest := path.Join("/workspace", filepath.ToSlash(prot.Rel))
 
@@ -240,8 +251,7 @@ var rootCmd = &cobra.Command{
 			case "ro", "rw":
 				runtimeArgs = append(runtimeArgs, "-v", hostPath+":"+dest+container.MountOpts(prot.Mode, selinux))
 			case "h":
-				// Hide = shadow with an empty, read-only mount so the tool sees
-				// nothing (a present-but-empty path; a bind can't truly unlink it).
+				// Hide the host path by binding an empty placeholder over it.
 				empty, err := hides.Get(info.IsDir())
 				if err != nil {
 					return fmt.Errorf("mount protection %q: %w", spec, err)

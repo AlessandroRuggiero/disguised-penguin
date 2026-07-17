@@ -2,6 +2,7 @@ package container
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -67,20 +68,36 @@ func TestMountOpts(t *testing.T) {
 }
 
 func TestHidePlaceholders(t *testing.T) {
-	h := NewHidePlaceholders()
+	base := filepath.Join(t.TempDir(), "placeholders")
+	h := NewHidePlaceholders(base)
+
 	dir, err := h.Get(true)
 	if err != nil {
 		t.Fatalf("Get(dir) error: %v", err)
 	}
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		t.Errorf("expected empty dir placeholder at %q: info=%v err=%v", dir, info, err)
+	}
+	if !strings.HasPrefix(dir, base) {
+		t.Errorf("dir placeholder %q not under base %q", dir, base)
+	}
+
 	file, err := h.Get(false)
 	if err != nil {
 		t.Fatalf("Get(file) error: %v", err)
 	}
-	if !strings.HasPrefix(dir, h.base) || !strings.HasPrefix(file, h.base) {
-		t.Errorf("placeholders not under base %q: dir=%q file=%q", h.base, dir, file)
+	if info, err := os.Stat(file); err != nil || info.IsDir() || info.Size() != 0 {
+		t.Errorf("expected empty file placeholder at %q: info=%v err=%v", file, info, err)
 	}
-	h.Cleanup()
-	if _, err := os.Stat(h.base); err == nil {
-		t.Errorf("expected base %q removed after Cleanup", h.base)
+	if !strings.HasPrefix(file, base) {
+		t.Errorf("file placeholder %q not under base %q", file, base)
+	}
+
+	// Get is idempotent: a second call on the reused location must not error.
+	if _, err := h.Get(true); err != nil {
+		t.Errorf("second Get(dir) error: %v", err)
+	}
+	if _, err := h.Get(false); err != nil {
+		t.Errorf("second Get(file) error: %v", err)
 	}
 }
