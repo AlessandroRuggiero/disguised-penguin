@@ -1,4 +1,4 @@
-.PHONY: all build run test clean dist dist-linux-amd64 dist-darwin-amd64 dist-darwin-arm64 dist-windows-amd64
+.PHONY: all build run test test-smoke test-integration test-e2e clean dist dist-linux-amd64 dist-darwin-amd64 dist-darwin-arm64 dist-windows-amd64
 
 APP_NAME=dp
 BIN_DIR=bin
@@ -19,6 +19,16 @@ run: build
 test:
 	@echo "Running tests..."
 	@go test -v ./...
+
+test-smoke:
+	@echo "Running smoke suite..."
+	@go test -tags=smoke -v ./e2e/...
+
+test-integration:
+	@echo "Running container integration suite (needs docker/podman)..."
+	@go test -tags=integration -timeout 300s -v ./e2e/...
+
+test-e2e: test-smoke test-integration
 
 clean:
 	@echo "Cleaning up..."
