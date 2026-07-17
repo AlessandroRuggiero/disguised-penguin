@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -794,7 +795,7 @@ var workspaceProtectionRemoveCmd = &cobra.Command{
 		workspaceName := args[0]
 		// Clean the path the same way ParseProtection stored it, so ".git",
 		// "./.git" and ".git/" all match the recorded protection.
-		mountPath := filepath.Clean(args[1])
+		mountPath := path.Clean(args[1])
 
 		ws, exists, err := store.GetWorkspaceByName(workspaceName)
 		if err != nil {
