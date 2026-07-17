@@ -26,7 +26,7 @@ func Get(name string) (*Workspace, error) {
 func (w *Workspace) Dir() string {
 	return w.dir
 }
- 
+
 func (w *Workspace) CLIDir(cliName string) string {
 	return filepath.Join(w.dir, "volumes", cliName)
 }

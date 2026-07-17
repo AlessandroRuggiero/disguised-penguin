@@ -14,6 +14,10 @@ type MountProtection struct {
 	Mode string
 }
 
+func (mp MountProtection) String() string {
+	return fmt.Sprintf("%s:%s", mp.Rel, mp.Mode)
+}
+
 // ParseProtection parses a "--mp PATH:MODE" spec, validating the mode and
 // confining the path to the workspace (no absolute paths or ".." escapes).
 func ParseProtection(spec string) (MountProtection, error) {
@@ -59,39 +63,37 @@ func MountOpts(mode string, selinux bool) string {
 	return ":" + strings.Join(opts, ",")
 }
 
-// HidePlaceholders lazily creates a single temp directory holding one empty
-// dir and one empty file, reused as the source for every "h" (hide) mount, and
-// removed via Cleanup when the container exits.
+// HidePlaceholders provides the empty dir and file bind mounted over targets
+// to hide them ("h" mode). Their contents never change, so they live at a
+// fixed path under dir and are reused across runs. dir must be a host path the
+// runtime shares; the app data dir sits under $HOME, shared by default.
 type HidePlaceholders struct {
-	base string
+	dir string
 }
 
-func NewHidePlaceholders() *HidePlaceholders { return &HidePlaceholders{} }
+func NewHidePlaceholders(dir string) *HidePlaceholders {
+	return &HidePlaceholders{dir: dir}
+}
 
-// Get returns the path of an empty placeholder matching the target type
-// (directory or file), creating the backing temp dir on first use.
+// Get returns an empty placeholder path matching the target type (dir or
+// file), creating it on demand. Creation is idempotent, so it recreates a
+// deleted placeholder and stays safe across concurrent dp runs.
 func (h *HidePlaceholders) Get(isDir bool) (string, error) {
-	if h.base == "" {
-		base, err := os.MkdirTemp("", "dp-mp-")
-		if err != nil {
-			return "", fmt.Errorf("failed to create hide placeholder: %w", err)
-		}
-		h.base = base
-		if err := os.Mkdir(filepath.Join(base, "dir"), 0755); err != nil {
-			return "", fmt.Errorf("failed to create hide placeholder: %w", err)
-		}
-		if err := os.WriteFile(filepath.Join(base, "file"), nil, 0644); err != nil {
-			return "", fmt.Errorf("failed to create hide placeholder: %w", err)
-		}
+	if err := os.MkdirAll(h.dir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create hide placeholder: %w", err)
 	}
 	if isDir {
-		return filepath.Join(h.base, "dir"), nil
+		p := filepath.Join(h.dir, "dir")
+		if err := os.Mkdir(p, 0755); err != nil && !os.IsExist(err) {
+			return "", fmt.Errorf("failed to create hide placeholder: %w", err)
+		}
+		return p, nil
 	}
-	return filepath.Join(h.base, "file"), nil
-}
-
-func (h *HidePlaceholders) Cleanup() {
-	if h.base != "" {
-		os.RemoveAll(h.base)
+	p := filepath.Join(h.dir, "file")
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		if err := os.WriteFile(p, nil, 0644); err != nil {
+			return "", fmt.Errorf("failed to create hide placeholder: %w", err)
+		}
 	}
+	return p, nil
 }
