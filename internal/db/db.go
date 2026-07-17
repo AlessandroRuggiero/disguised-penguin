@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -107,7 +108,7 @@ func (s *Store) RunMigrations() error {
 		}
 
 		if migVersion > currentVersion {
-			content, err := migrationFiles.ReadFile(filepath.Join("migrations", name))
+			content, err := migrationFiles.ReadFile(path.Join("migrations", name))
 			if err != nil {
 				return fmt.Errorf("failed to read migration %s: %w", name, err)
 			}
