@@ -3,6 +3,7 @@ package container
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -33,14 +34,15 @@ func ParseProtection(spec string) (MountProtection, error) {
 		return MountProtection{}, fmt.Errorf("invalid mount protection mode %q in %q (expected ro, rw, or h)", mode, spec)
 	}
 
-	rel := filepath.Clean(rawPath)
-	if filepath.IsAbs(rel) {
+	// Protection paths are Linux container paths, so clean/validate with forward-slash path semantics on every host OS.
+	rel := path.Clean(rawPath)
+	if path.IsAbs(rel) || filepath.VolumeName(rawPath) != "" {
 		return MountProtection{}, fmt.Errorf("mount protection path %q must be relative to the workspace", rawPath)
 	}
 	if rel == "." {
 		return MountProtection{}, fmt.Errorf("mount protection cannot target the workspace root %q", rawPath)
 	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if rel == ".." || strings.HasPrefix(rel, "../") {
 		return MountProtection{}, fmt.Errorf("mount protection path %q must stay within the workspace", rawPath)
 	}
 	return MountProtection{Rel: rel, Mode: mode}, nil

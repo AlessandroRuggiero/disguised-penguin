@@ -1,5 +1,7 @@
 # Disguised Penguin (dp)
 
+[![CI](https://github.com/AlessandroRuggiero/disguised-penguin/actions/workflows/ci.yml/badge.svg)](https://github.com/AlessandroRuggiero/disguised-penguin/actions/workflows/ci.yml)
+
 Run CLI applications in secure, isolated containers (Docker or Podman) without cluttering your system. Disguised Penguin completely sandboxes your tools, preventing them from accessing sensitive files on your host machine, while keeping them as **seamless** to use as native applications.
 
 ### Examples:
