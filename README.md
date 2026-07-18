@@ -1,6 +1,9 @@
 # Disguised Penguin (dp)
 
 [![CI](https://github.com/AlessandroRuggiero/disguised-penguin/actions/workflows/ci.yml/badge.svg)](https://github.com/AlessandroRuggiero/disguised-penguin/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/AlessandroRuggiero/disguised-penguin?style=flat&logo=github)](https://github.com/AlessandroRuggiero/disguised-penguin/releases/latest)
+[![Go](https://img.shields.io/github/go-mod/go-version/AlessandroRuggiero/disguised-penguin?style=flat&logo=go)](go.mod)
+[![License](https://img.shields.io/github/license/AlessandroRuggiero/disguised-penguin?style=flat&logo=opensourceinitiative&logoColor=white)](LICENSE)
 
 Run CLI applications in secure, isolated containers (Docker or Podman) without cluttering your system. Disguised Penguin completely sandboxes your tools, preventing them from accessing sensitive files on your host machine, while keeping them as **seamless** to use as native applications.
 
