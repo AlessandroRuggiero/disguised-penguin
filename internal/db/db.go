@@ -132,7 +132,7 @@ func (s *Store) GetCliByName(name string) (*models.CLI, error) {
 	var cli models.CLI
 	var configMountsStr string
 	var portMappingsStr string
-	err := s.db.QueryRow(`SELECT id, name, container_name, config_mounts, port_mappings FROM clis WHERE name = ?`, name).Scan(&cli.ID, &cli.Name, &cli.ContainerName, &configMountsStr, &portMappingsStr)
+	err := s.db.QueryRow(`SELECT id, name, container_name, config_mounts, port_mappings FROM clis WHERE name = ?`, name).Scan(&cli.ID, &cli.Name, &cli.Image, &configMountsStr, &portMappingsStr)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("CLI '%s' not found in database.\nSuggestion: Use 'dp list' to see available CLIs or 'dp install %s' to install it from the remote repository", name, name)
 	}
@@ -148,8 +148,8 @@ func (s *Store) GetCliByName(name string) (*models.CLI, error) {
 	return &cli, nil
 }
 
-func (s *Store) AddCLI(name, containerName string) error {
-	_, err := s.db.Exec(`INSERT INTO clis (name, container_name, config_mounts, port_mappings) VALUES (?, ?, ?, ?)`, name, containerName, "{}", "{}")
+func (s *Store) AddCLI(name, image string) error {
+	_, err := s.db.Exec(`INSERT INTO clis (name, container_name, config_mounts, port_mappings) VALUES (?, ?, ?, ?)`, name, image, "{}", "{}")
 	return err
 }
 
@@ -170,7 +170,7 @@ func (s *Store) InstallCLI(name string, pkg *models.RemotePackage) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal port mappings: %w", err)
 	}
-	_, err = s.db.Exec(`INSERT INTO clis (name, container_name, config_mounts, port_mappings) VALUES (?, ?, ?, ?)`, name, pkg.Container, string(configMountsBytes), string(portMappingsBytes))
+	_, err = s.db.Exec(`INSERT INTO clis (name, container_name, config_mounts, port_mappings) VALUES (?, ?, ?, ?)`, name, pkg.Image, string(configMountsBytes), string(portMappingsBytes))
 	return err
 }
 
@@ -188,11 +188,11 @@ func (s *Store) ListCLIs() ([]models.CLI, error) {
 
 	var clis []models.CLI
 	for rows.Next() {
-		var name, containerName string
-		if err := rows.Scan(&name, &containerName); err != nil {
+		var name, image string
+		if err := rows.Scan(&name, &image); err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
-		clis = append(clis, models.CLI{Name: name, ContainerName: containerName})
+		clis = append(clis, models.CLI{Name: name, Image: image})
 	}
 	return clis, nil
 }
@@ -279,7 +279,7 @@ func (s *Store) UpdateCLI(name string, pkg *models.RemotePackage) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal port mappings: %w", err)
 	}
-	_, err = s.db.Exec(`UPDATE clis SET container_name = ?, config_mounts = ?, port_mappings = ? WHERE name = ?`, pkg.Container, string(configMountsBytes), string(portMappingsBytes), name)
+	_, err = s.db.Exec(`UPDATE clis SET container_name = ?, config_mounts = ?, port_mappings = ? WHERE name = ?`, pkg.Image, string(configMountsBytes), string(portMappingsBytes), name)
 	return err
 }
 

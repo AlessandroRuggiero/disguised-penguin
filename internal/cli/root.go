@@ -122,6 +122,17 @@ var rootCmd = &cobra.Command{
 			return fmt.Errorf("requires at least 1 arg, only received 0")
 		}
 
+		cwd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("failed to get current directory: %w", err)
+		}
+
+		// Variants come from the directory dp runs in.
+		variants, err := loadVariants(cwd)
+		if err != nil {
+			return err
+		}
+
 		cliName := cliArgs[0]
 		cli, err := store.GetCliByName(cliName)
 		if err != nil {
@@ -137,17 +148,15 @@ var rootCmd = &cobra.Command{
 			return fmt.Errorf("CLI %s is not installed%s\n", cliName, suggestion_text)
 		}
 
+		// Check whether there is a local variant
+		_, isVariant := variants[cliName]
+
 		dbWorkspace, exists, err := store.GetWorkspaceByName(workspaceName)
 
 		if err != nil {
 			return fmt.Errorf("failed to look up workspace '%s': %w", workspaceName, err)
 		} else if !exists {
 			return fmt.Errorf("workspace '%s' not found (create it with 'dp workspace add %s')", workspaceName, workspaceName)
-		}
-
-		cwd, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("failed to get current directory: %w", err)
 		}
 
 		runtime, err := container.ResolveRuntime(runtimeRequested)
@@ -263,8 +272,24 @@ var rootCmd = &cobra.Command{
 		for hostPort, containerPort := range cli.PortMappings {
 			runtimeArgs = append(runtimeArgs, "-p", fmt.Sprintf("%s:%s", hostPort, containerPort))
 		}
+		if isVariant {
+			// If the CLI is a variant, check if it has already been built
+			built, err := isVariantBuilt(runtime, cli.Image, cwd)
+			if err != nil {
+				return fmt.Errorf("failed to check if variant is built: %w", err)
+			}
+			if !built {
+				return fmt.Errorf("variant of '%s' has not been built yet. Please run 'dp local variant build %s' first", cliName, cliName)
+			}
 
-		runtimeArgs = append(runtimeArgs, cli.ContainerName)
+			// If the CLI is a variant, use its variant image.
+			variantImageRef := variantImage(cli.Image, cwd)
+			runtimeArgs = append(runtimeArgs, variantImageRef)
+		} else {
+			// If the CLI is not a variant, use its image directly.
+			runtimeArgs = append(runtimeArgs, cli.Image)
+		}
+
 		runtimeArgs = append(runtimeArgs, cliArgs[1:]...)
 		runtimeCmd := exec.Command(string(runtime), runtimeArgs...)
 		runtimeCmd.Stdin = os.Stdin
@@ -301,6 +326,11 @@ func init() {
 	registryCmd.AddCommand(registryListCmd)
 	registryCmd.AddCommand(registryRemoveCmd)
 	registryCmd.AddCommand(registryVisitCmd)
+
+	rootCmd.AddCommand(localCmd)
+	localCmd.AddCommand(localVariantCmd)
+	localVariantCmd.AddCommand(localVariantBuildCmd)
+	localVariantCmd.AddCommand(localVariantExtendCmd)
 
 	rootCmd.AddCommand(workspaceCmd)
 	workspaceCmd.AddCommand(workspaceAddCmd)

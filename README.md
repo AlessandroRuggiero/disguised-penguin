@@ -110,7 +110,7 @@ Your current working directory is mounted as `/workspace` inside the container.
 
 ```bash
 # This is not recommended for most users, use install instead to pull from a registry
-dp add <name> <container-image>
+dp add <name> <image>
 ```
 
 ### Remove a CLI
@@ -143,7 +143,7 @@ Downloads the latest `dp` binary from GitHub Releases and replaces the current e
 ```bash
 dp list
 ```
-Shows all local CLI configurations and mapped containers.
+Shows all local CLI configurations and mapped images.
 
 ### Manage Remote Registries
 

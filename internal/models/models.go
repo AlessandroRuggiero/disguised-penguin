@@ -9,15 +9,16 @@ const (
 )
 
 type CLI struct {
-	ID            int
-	Name          string
-	ContainerName string
-	ConfigMounts  map[string]string
-	PortMappings  map[string]string
+	ID           int
+	Name         string
+	Image        string
+	ConfigMounts map[string]string
+	PortMappings map[string]string
 }
 
 type RemotePackage struct {
-	Container    string            `json:"container"`
+	// The JSON field stays "container" so already-published registries keep working.
+	Image        string            `json:"container"`
 	ConfigMounts map[string]string `json:"configmounts,omitempty"`
 	PortMappings map[string]string `json:"portmappings,omitempty"`
 }
@@ -44,6 +45,21 @@ type MountProtection struct {
 	WorkspaceID int
 	MountPath   string
 	Permission  string
+}
+
+type Variant struct {
+	Of          string            `json:"of"`
+	BuildFile   string            `json:"build_file"`
+	LocalMounts map[string]string `json:"local_mounts,omitempty"`
+}
+
+type FileVariant struct {
+	BuildFile   string            `json:"build_file"`
+	LocalMounts map[string]string `json:"local_mounts,omitempty"`
+}
+
+type VariantConfigFile struct {
+	Variants map[string]FileVariant `json:"variants"`
 }
 
 func MakeRegistryType(s string) (RegistryType, error) {
