@@ -10,3 +10,6 @@ bin/
 # Go workspace
 go.work
 go.work.sum
+
+# Disguised Penguin config
+.dp

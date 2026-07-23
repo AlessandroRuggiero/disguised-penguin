@@ -40,19 +40,31 @@ func printKeyValueSection(title string, m map[string]string) {
 	}
 }
 
+func printConfigMounts(mounts map[string]models.ConfigMount) {
+	view := make(map[string]string, len(mounts))
+	for k, v := range mounts {
+		p := v.Path
+		if v.IsFile() {
+			p += " (file)"
+		}
+		view[k] = p
+	}
+	printKeyValueSection("Config mounts", view)
+}
+
 var addCmd = &cobra.Command{
-	Use:               "add [name] [container_name]",
+	Use:               "add [name] [image]",
 	Aliases:           []string{"a"},
 	Short:             "Add a new CLI configuration to the database",
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: cobra.NoFileCompletions,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		containerName := args[1]
-		if err := store.AddCLI(name, containerName); err != nil {
+		image := args[1]
+		if err := store.AddCLI(name, image); err != nil {
 			return fmt.Errorf("failed to insert CLI into db: %w", err)
 		}
-		fmt.Printf("Successfully added CLI '%s' mapped to container '%s'\n", name, containerName)
+		fmt.Printf("Successfully added CLI '%s' mapped to image '%s'\n", name, image)
 		return nil
 	},
 }
@@ -84,12 +96,12 @@ var rmCmd = &cobra.Command{
 			return fmt.Errorf("failed to list CLIs: %w", err)
 		}
 
-		var containerName string
+		var image string
 		found := false
 		sharedByOthers := false
 		for _, c := range clis {
 			if c.Name == name {
-				containerName = c.ContainerName
+				image = c.Image
 				found = true
 			}
 		}
@@ -98,7 +110,7 @@ var rmCmd = &cobra.Command{
 			return nil
 		}
 		for _, c := range clis {
-			if c.Name != name && c.ContainerName == containerName {
+			if c.Name != name && c.Image == image {
 				sharedByOthers = true
 				break
 			}
@@ -110,23 +122,23 @@ var rmCmd = &cobra.Command{
 		fmt.Printf("Successfully removed CLI '%s'\n", name)
 
 		if sharedByOthers {
-			fmt.Printf("Image '%s' is still used by another CLI, leaving it in place.\n", containerName)
+			fmt.Printf("Image '%s' is still used by another CLI, leaving it in place.\n", image)
 			return nil
 		}
 
 		runtime, err := container.ResolveRuntime(containerRuntimeFlag)
 		if err != nil {
-			fmt.Printf("Warning: could not resolve a container runtime to remove image '%s': %v\n", containerName, err)
+			fmt.Printf("Warning: could not resolve a container runtime to remove image '%s': %v\n", image, err)
 			return nil
 		}
-		runtimeCmd := exec.Command(string(runtime), "rmi", containerName)
+		runtimeCmd := exec.Command(string(runtime), "rmi", image)
 		runtimeCmd.Stdout = os.Stdout
 		runtimeCmd.Stderr = os.Stderr
 		if err := runtimeCmd.Run(); err != nil {
-			fmt.Printf("Warning: failed to remove image '%s': %v\n", containerName, err)
+			fmt.Printf("Warning: failed to remove image '%s': %v\n", image, err)
 			return nil
 		}
-		fmt.Printf("Successfully removed image '%s'\n", containerName)
+		fmt.Printf("Successfully removed image '%s'\n", image)
 		return nil
 	},
 }
@@ -165,17 +177,17 @@ var installCmd = &cobra.Command{
 			return fmt.Errorf("CLI '%s' is already installed", name)
 		}
 
-		fmt.Printf("Pulling image '%s' for CLI '%s' using %s...\n", pkgToInstall.Container, name, runtime)
-		runtimeCmd := exec.Command(string(runtime), "pull", pkgToInstall.Container)
+		fmt.Printf("Pulling image '%s' for CLI '%s' using %s...\n", pkgToInstall.Image, name, runtime)
+		runtimeCmd := exec.Command(string(runtime), "pull", pkgToInstall.Image)
 		runtimeCmd.Stdout = os.Stdout
 		runtimeCmd.Stderr = os.Stderr
 
 		if err := runtimeCmd.Run(); err != nil {
 			return fmt.Errorf("failed to pull image with %s: %w", runtime, err)
 		}
-		fmt.Printf("Successfully pulled image '%s'\n", pkgToInstall.Container)
+		fmt.Printf("Successfully pulled image '%s'\n", pkgToInstall.Image)
 
-		printKeyValueSection("Config mounts", pkgToInstall.ConfigMounts)
+		printConfigMounts(pkgToInstall.ConfigMounts)
 		printKeyValueSection("Port mappings", pkgToInstall.PortMappings)
 
 		if err := store.InstallCLI(name, pkgToInstall); err != nil {
@@ -196,7 +208,7 @@ var listCmd = &cobra.Command{
 		}
 		fmt.Println("Available CLIs:")
 		for _, c := range clis {
-			fmt.Printf("- %s (container: %s)\n", c.Name, c.ContainerName)
+			fmt.Printf("- %s (image: %s)\n", c.Name, c.Image)
 		}
 		return nil
 	},
@@ -334,17 +346,17 @@ func updateOne(name string, runtime container.Runtime) error {
 		return fmt.Errorf("package '%s' not found in any remote registry", name)
 	}
 
-	fmt.Printf("Pulling latest image '%s' for CLI '%s' using %s...\n", pkgToUpdate.Container, name, runtime)
-	runtimeCmd := exec.Command(string(runtime), "pull", pkgToUpdate.Container)
+	fmt.Printf("Pulling latest image '%s' for CLI '%s' using %s...\n", pkgToUpdate.Image, name, runtime)
+	runtimeCmd := exec.Command(string(runtime), "pull", pkgToUpdate.Image)
 	runtimeCmd.Stdout = os.Stdout
 	runtimeCmd.Stderr = os.Stderr
 
 	if err := runtimeCmd.Run(); err != nil {
 		return fmt.Errorf("failed to pull image with %s: %w", runtime, err)
 	}
-	fmt.Printf("Successfully pulled latest image '%s'\n", pkgToUpdate.Container)
+	fmt.Printf("Successfully pulled latest image '%s'\n", pkgToUpdate.Image)
 
-	printKeyValueSection("Config mounts", pkgToUpdate.ConfigMounts)
+	printConfigMounts(pkgToUpdate.ConfigMounts)
 	printKeyValueSection("Port mappings", pkgToUpdate.PortMappings)
 
 	if err := store.UpdateCLI(name, pkgToUpdate); err != nil {
@@ -544,7 +556,7 @@ var registryVisitCmd = &cobra.Command{
 			}
 			fmt.Printf("Registry: %s (Type: %s, Priority: %d)\n", registry.Name, registry.RegistryType, registry.Priority)
 			for pkgName, pkg := range pkgs {
-				fmt.Printf("- \033[1m%s\033[0m (Container: %s)\n", pkgName, pkg.Container)
+				fmt.Printf("- \033[1m%s\033[0m (Image: %s)\n", pkgName, pkg.Image)
 			}
 		}
 		return nil

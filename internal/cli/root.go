@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
-	"path"
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
@@ -122,6 +121,21 @@ var rootCmd = &cobra.Command{
 			return fmt.Errorf("requires at least 1 arg, only received 0")
 		}
 
+		cwd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("failed to get current directory: %w", err)
+		}
+
+		// Variants and local mounts come from the directory dp runs in.
+		variants, err := loadVariants(cwd)
+		if err != nil {
+			return err
+		}
+		localMounts, err := loadLocalMounts(cwd)
+		if err != nil {
+			return err
+		}
+
 		cliName := cliArgs[0]
 		cli, err := store.GetCliByName(cliName)
 		if err != nil {
@@ -137,17 +151,15 @@ var rootCmd = &cobra.Command{
 			return fmt.Errorf("CLI %s is not installed%s\n", cliName, suggestion_text)
 		}
 
+		// Check whether there is a local variant
+		_, isVariant := variants[cliName]
+
 		dbWorkspace, exists, err := store.GetWorkspaceByName(workspaceName)
 
 		if err != nil {
 			return fmt.Errorf("failed to look up workspace '%s': %w", workspaceName, err)
 		} else if !exists {
 			return fmt.Errorf("workspace '%s' not found (create it with 'dp workspace add %s')", workspaceName, workspaceName)
-		}
-
-		cwd, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("failed to get current directory: %w", err)
 		}
 
 		runtime, err := container.ResolveRuntime(runtimeRequested)
@@ -198,25 +210,40 @@ var rootCmd = &cobra.Command{
 			return fmt.Errorf("failed to resolve workspace '%s': %w", workspaceName, err)
 		}
 
-		for volumeName, containerPath := range cli.ConfigMounts {
+		for volumeName, mount := range cli.ConfigMounts {
 			hostVolumePath := ws.VolumeDir(cli.Name, volumeName)
-			if err := os.MkdirAll(hostVolumePath, 0755); err != nil {
+			if mount.IsFile() {
+				// Bind a file: ensure the parent dir and an empty file exist, so
+				// the runtime binds a file rather than auto-creating a directory.
+				if err := os.MkdirAll(filepath.Dir(hostVolumePath), 0755); err != nil {
+					return fmt.Errorf("failed to create host volume directory: %w", err)
+				}
+				if _, err := os.Stat(hostVolumePath); os.IsNotExist(err) {
+					f, err := os.OpenFile(hostVolumePath, os.O_CREATE, 0644)
+					if err != nil {
+						return fmt.Errorf("failed to create host volume file: %w", err)
+					}
+					f.Close()
+				}
+			} else if err := os.MkdirAll(hostVolumePath, 0755); err != nil {
 				return fmt.Errorf("failed to create host volume directory: %w", err)
 			}
-			runtimeArgs = append(runtimeArgs, "-v", fmt.Sprintf("%s:%s%s", hostVolumePath, containerPath, mountSuffix))
+			runtimeArgs = append(runtimeArgs, "-v", fmt.Sprintf("%s:%s%s", hostVolumePath, mount.Path, mountSuffix))
 		}
 
-		// Mount protections (--mp PATH:MODE) overlay a nested mount on top of the
-		// /workspace bind so a subpath can be made read-only, writable, or hidden
-		// (shadowed by an empty mount). The runtime mounts by destination depth, so
-		// these always shadow the broader /workspace mount regardless of arg order.
+		// Mount protections (--mp PATH:MODE) and .dp/mounts.json overlay nested
+		// mounts on top of the /workspace bind so a subpath can be made read-only,
+		// writable, or hidden, or a folder under .dp/ can be exposed elsewhere. The
+		// runtime mounts by destination depth, so these always shadow the broader
+		// /workspace mount regardless of arg order.
 		dbPath, err := db.GetDBPath()
 		if err != nil {
 			return fmt.Errorf("failed to resolve data directory: %w", err)
 		}
 		hides := container.NewHidePlaceholders(filepath.Join(filepath.Dir(dbPath), "placeholders"))
 
-		// Add workspace-level mount protections from the database, so they apply to all CLIs in the workspace.
+		// Workspace-level protections from the database apply to all CLIs in the
+		// workspace.
 		workspaceProtections, err := store.GetMountProtections(dbWorkspace.ID)
 		if err != nil {
 			return fmt.Errorf("failed to get mount protections: %w", err)
@@ -225,46 +252,37 @@ var rootCmd = &cobra.Command{
 		for i, prot := range workspaceProtections {
 			workspaceProtSpecs[i] = prot.String()
 		}
-		// Workspace-level mount protections are applied first, so CLI-level mount protections can override them if needed.
-		mpSpecs = append(mpSpecs, workspaceProtSpecs...)
-		for _, spec := range mpSpecs {
-			prot, err := container.ParseProtection(spec)
-			if err != nil {
-				return err
-			}
-			hostPath := filepath.Join(cwd, prot.Rel)
-			info, err := os.Stat(hostPath)
-			missing := os.IsNotExist(err)
-			if err != nil && !missing {
-				return fmt.Errorf("mount protection %q: cannot access %s: %w", spec, prot.Rel, err)
-			}
-			// Every mode binds onto an existing mountpoint, so the path must
-			// exist on the host. Hiding a not-yet-created path would force the
-			// runtime to create a nested mountpoint, which Docker Desktop's
-			// virtiofs rejects ("outside of rootfs").
-			if missing {
-				continue
-			}
-			dest := path.Join("/workspace", filepath.ToSlash(prot.Rel))
 
-			switch prot.Mode {
-			case "ro", "rw":
-				runtimeArgs = append(runtimeArgs, "-v", hostPath+":"+dest+container.MountOpts(prot.Mode, selinux))
-			case "h":
-				// Hide the host path by binding an empty placeholder over it.
-				empty, err := hides.Get(info.IsDir())
-				if err != nil {
-					return fmt.Errorf("mount protection %q: %w", spec, err)
-				}
-				runtimeArgs = append(runtimeArgs, "-v", empty+":"+dest+container.MountOpts("ro", selinux))
-			}
+		// Priority on a shared destination is workspace-level < .dp-level < args-level.
+		overlays, err := buildWorkspaceOverlays(cwd, selinux, hides, workspaceProtSpecs, localMounts, mpSpecs)
+		if err != nil {
+			return err
+		}
+		for _, overlay := range overlays {
+			runtimeArgs = append(runtimeArgs, "-v", overlay)
 		}
 
 		for hostPort, containerPort := range cli.PortMappings {
 			runtimeArgs = append(runtimeArgs, "-p", fmt.Sprintf("%s:%s", hostPort, containerPort))
 		}
+		if isVariant {
+			// If the CLI is a variant, check if it has already been built
+			built, err := isVariantBuilt(runtime, cli.Image, cwd)
+			if err != nil {
+				return fmt.Errorf("failed to check if variant is built: %w", err)
+			}
+			if !built {
+				return fmt.Errorf("variant of '%s' has not been built yet. Please run 'dp local variant build %s' first", cliName, cliName)
+			}
 
-		runtimeArgs = append(runtimeArgs, cli.ContainerName)
+			// If the CLI is a variant, use its variant image.
+			variantImageRef := variantImage(cli.Image, cwd)
+			runtimeArgs = append(runtimeArgs, variantImageRef)
+		} else {
+			// If the CLI is not a variant, use its image directly.
+			runtimeArgs = append(runtimeArgs, cli.Image)
+		}
+
 		runtimeArgs = append(runtimeArgs, cliArgs[1:]...)
 		runtimeCmd := exec.Command(string(runtime), runtimeArgs...)
 		runtimeCmd.Stdin = os.Stdin
@@ -301,6 +319,11 @@ func init() {
 	registryCmd.AddCommand(registryListCmd)
 	registryCmd.AddCommand(registryRemoveCmd)
 	registryCmd.AddCommand(registryVisitCmd)
+
+	rootCmd.AddCommand(localCmd)
+	localCmd.AddCommand(localVariantCmd)
+	localVariantCmd.AddCommand(localVariantBuildCmd)
+	localVariantCmd.AddCommand(localVariantExtendCmd)
 
 	rootCmd.AddCommand(workspaceCmd)
 	workspaceCmd.AddCommand(workspaceAddCmd)

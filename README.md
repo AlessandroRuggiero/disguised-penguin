@@ -110,7 +110,7 @@ Your current working directory is mounted as `/workspace` inside the container.
 
 ```bash
 # This is not recommended for most users, use install instead to pull from a registry
-dp add <name> <container-image>
+dp add <name> <image>
 ```
 
 ### Remove a CLI
@@ -143,7 +143,7 @@ Downloads the latest `dp` binary from GitHub Releases and replaces the current e
 ```bash
 dp list
 ```
-Shows all local CLI configurations and mapped containers.
+Shows all local CLI configurations and mapped images.
 
 ### Manage Remote Registries
 
@@ -232,6 +232,31 @@ To apply a protection for a single run instead of persisting it, use the `--mp` 
 ```bash
 dp --mp .git:ro --mp .env:h <cli-name> [args...]
 ```
+### Project Mounts With `.dp/mounts.json`
+
+A project can overlay its workspace for every CLI run from that directory by listing entries in `.dp/mounts.json`. `mounts` is a list of objects, each with a `path` (relative to the workspace root) and a `mode`:
+
+- `ro` / `rw`: mount something at `path` read-only or read-write.
+- `h`: hide `path` (shadow it with an empty mount).
+
+An optional `source` names a folder under `.dp/` to expose at `path`. When set, that folder is mounted at `path` and **hidden at its original `.dp/` location**, so the tool only sees it where you put it. `source` is only valid with `ro`/`rw`.
+
+```json
+{
+  "mounts": [
+    { "source": "secrets", "path": "config/secrets", "mode": "ro" },
+    { "source": "scratch", "path": "scratch", "mode": "rw" },
+    { "path": "node_modules", "mode": "h" }
+  ]
+}
+```
+
+With the file above, `.dp/secrets` appears at `/workspace/config/secrets` read-only (and is no longer visible at `/workspace/.dp/secrets`), `.dp/scratch` is mounted read-write at `/workspace/scratch`, and `/workspace/node_modules` is hidden.
+
+When the same destination is targeted from more than one place, the effective priority is **workspace-level protections → `.dp/mounts.json` → `--mp` args**, so a per-run `--mp` always wins.
+
+The `.dp/` directory itself is dp's control plane (build files, `variants.json`, `mounts.json`) and is consumed on the host, so it is mounted **read-only** by default — a sandboxed tool can't tamper with the recipes that govern future runs. This is the lowest-priority overlay, so a `.dp/mounts.json` entry or a `--mp .dp/...:rw` can still re-open a subpath if you really need it writable.
+
 ### Database Management
 
 ```bash
@@ -272,6 +297,17 @@ When you run a CLI, it spawns a container with:
 - Your current directory mounted to `/workspace`
 - Config volumes mounted at their configured paths
 - Port mappings exposed as specified
+
+A package's `configmounts` maps a volume name to a container path. A value can be a plain string (a **directory**, the default) or an object to mount a single **file**:
+
+```json
+"configmounts": {
+  "config": "/penguin/.config/tool",
+  "netrc":  { "path": "/penguin/.netrc", "type": "file" }
+}
+```
+
+Each is a persistent host path under `.../volumes/<cli>/<volume>` and is created automatically (an empty directory, or an empty file for `type: file`).
 
 ## Requirements
 - Platforms: Linux (amd64), macOS (amd64/arm64), and Windows (amd64)
