@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
-	"path"
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
@@ -127,8 +126,12 @@ var rootCmd = &cobra.Command{
 			return fmt.Errorf("failed to get current directory: %w", err)
 		}
 
-		// Variants come from the directory dp runs in.
+		// Variants and local mounts come from the directory dp runs in.
 		variants, err := loadVariants(cwd)
+		if err != nil {
+			return err
+		}
+		localMounts, err := loadLocalMounts(cwd)
 		if err != nil {
 			return err
 		}
@@ -228,17 +231,19 @@ var rootCmd = &cobra.Command{
 			runtimeArgs = append(runtimeArgs, "-v", fmt.Sprintf("%s:%s%s", hostVolumePath, mount.Path, mountSuffix))
 		}
 
-		// Mount protections (--mp PATH:MODE) overlay a nested mount on top of the
-		// /workspace bind so a subpath can be made read-only, writable, or hidden
-		// (shadowed by an empty mount). The runtime mounts by destination depth, so
-		// these always shadow the broader /workspace mount regardless of arg order.
+		// Mount protections (--mp PATH:MODE) and .dp/mounts.json overlay nested
+		// mounts on top of the /workspace bind so a subpath can be made read-only,
+		// writable, or hidden, or a folder under .dp/ can be exposed elsewhere. The
+		// runtime mounts by destination depth, so these always shadow the broader
+		// /workspace mount regardless of arg order.
 		dbPath, err := db.GetDBPath()
 		if err != nil {
 			return fmt.Errorf("failed to resolve data directory: %w", err)
 		}
 		hides := container.NewHidePlaceholders(filepath.Join(filepath.Dir(dbPath), "placeholders"))
 
-		// Add workspace-level mount protections from the database, so they apply to all CLIs in the workspace.
+		// Workspace-level protections from the database apply to all CLIs in the
+		// workspace.
 		workspaceProtections, err := store.GetMountProtections(dbWorkspace.ID)
 		if err != nil {
 			return fmt.Errorf("failed to get mount protections: %w", err)
@@ -247,39 +252,14 @@ var rootCmd = &cobra.Command{
 		for i, prot := range workspaceProtections {
 			workspaceProtSpecs[i] = prot.String()
 		}
-		// Workspace-level mount protections are applied first, so CLI-level mount protections can override them if needed.
-		mpSpecs = append(mpSpecs, workspaceProtSpecs...)
-		for _, spec := range mpSpecs {
-			prot, err := container.ParseProtection(spec)
-			if err != nil {
-				return err
-			}
-			hostPath := filepath.Join(cwd, prot.Rel)
-			info, err := os.Stat(hostPath)
-			missing := os.IsNotExist(err)
-			if err != nil && !missing {
-				return fmt.Errorf("mount protection %q: cannot access %s: %w", spec, prot.Rel, err)
-			}
-			// Every mode binds onto an existing mountpoint, so the path must
-			// exist on the host. Hiding a not-yet-created path would force the
-			// runtime to create a nested mountpoint, which Docker Desktop's
-			// virtiofs rejects ("outside of rootfs").
-			if missing {
-				continue
-			}
-			dest := path.Join("/workspace", filepath.ToSlash(prot.Rel))
 
-			switch prot.Mode {
-			case "ro", "rw":
-				runtimeArgs = append(runtimeArgs, "-v", hostPath+":"+dest+container.MountOpts(prot.Mode, selinux))
-			case "h":
-				// Hide the host path by binding an empty placeholder over it.
-				empty, err := hides.Get(info.IsDir())
-				if err != nil {
-					return fmt.Errorf("mount protection %q: %w", spec, err)
-				}
-				runtimeArgs = append(runtimeArgs, "-v", empty+":"+dest+container.MountOpts("ro", selinux))
-			}
+		// Priority on a shared destination is workspace-level < .dp-level < args-level.
+		overlays, err := buildWorkspaceOverlays(cwd, selinux, hides, workspaceProtSpecs, localMounts, mpSpecs)
+		if err != nil {
+			return err
+		}
+		for _, overlay := range overlays {
+			runtimeArgs = append(runtimeArgs, "-v", overlay)
 		}
 
 		for hostPort, containerPort := range cli.PortMappings {

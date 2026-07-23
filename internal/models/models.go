@@ -63,6 +63,16 @@ func (m *ConfigMount) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+type LocalMount struct {
+	Source string `json:"source,omitempty"`
+	Path   string `json:"path"`
+	Mode   string `json:"mode"` // Mode is "ro", "rw", or "h" (hidden). "h" is not valid with a Source.
+}
+
+type LocalMountConfigFile struct {
+	Mounts []LocalMount `json:"mounts"`
+}
+
 type RemoteRegistry struct {
 	URI          string
 	RegistryType RegistryType

@@ -232,6 +232,31 @@ To apply a protection for a single run instead of persisting it, use the `--mp` 
 ```bash
 dp --mp .git:ro --mp .env:h <cli-name> [args...]
 ```
+### Project Mounts With `.dp/mounts.json`
+
+A project can overlay its workspace for every CLI run from that directory by listing entries in `.dp/mounts.json`. `mounts` is a list of objects, each with a `path` (relative to the workspace root) and a `mode`:
+
+- `ro` / `rw`: mount something at `path` read-only or read-write.
+- `h`: hide `path` (shadow it with an empty mount).
+
+An optional `source` names a folder under `.dp/` to expose at `path`. When set, that folder is mounted at `path` and **hidden at its original `.dp/` location**, so the tool only sees it where you put it. `source` is only valid with `ro`/`rw`.
+
+```json
+{
+  "mounts": [
+    { "source": "secrets", "path": "config/secrets", "mode": "ro" },
+    { "source": "scratch", "path": "scratch", "mode": "rw" },
+    { "path": "node_modules", "mode": "h" }
+  ]
+}
+```
+
+With the file above, `.dp/secrets` appears at `/workspace/config/secrets` read-only (and is no longer visible at `/workspace/.dp/secrets`), `.dp/scratch` is mounted read-write at `/workspace/scratch`, and `/workspace/node_modules` is hidden.
+
+When the same destination is targeted from more than one place, the effective priority is **workspace-level protections → `.dp/mounts.json` → `--mp` args**, so a per-run `--mp` always wins.
+
+The `.dp/` directory itself is dp's control plane (build files, `variants.json`, `mounts.json`) and is consumed on the host, so it is mounted **read-only** by default — a sandboxed tool can't tamper with the recipes that govern future runs. This is the lowest-priority overlay, so a `.dp/mounts.json` entry or a `--mp .dp/...:rw` can still re-open a subpath if you really need it writable.
+
 ### Database Management
 
 ```bash
