@@ -273,6 +273,17 @@ When you run a CLI, it spawns a container with:
 - Config volumes mounted at their configured paths
 - Port mappings exposed as specified
 
+A package's `configmounts` maps a volume name to a container path. A value can be a plain string (a **directory**, the default) or an object to mount a single **file**:
+
+```json
+"configmounts": {
+  "config": "/penguin/.config/tool",
+  "netrc":  { "path": "/penguin/.netrc", "type": "file" }
+}
+```
+
+Each is a persistent host path under `.../volumes/<cli>/<volume>` and is created automatically (an empty directory, or an empty file for `type: file`).
+
 ## Requirements
 - Platforms: Linux (amd64), macOS (amd64/arm64), and Windows (amd64)
 - To run `dp` (release binary): Docker or Podman (available in `PATH`), on macOS/Windows, Docker Desktop or Podman Desktop/`podman machine`

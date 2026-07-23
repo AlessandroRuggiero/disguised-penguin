@@ -207,12 +207,25 @@ var rootCmd = &cobra.Command{
 			return fmt.Errorf("failed to resolve workspace '%s': %w", workspaceName, err)
 		}
 
-		for volumeName, containerPath := range cli.ConfigMounts {
+		for volumeName, mount := range cli.ConfigMounts {
 			hostVolumePath := ws.VolumeDir(cli.Name, volumeName)
-			if err := os.MkdirAll(hostVolumePath, 0755); err != nil {
+			if mount.IsFile() {
+				// Bind a file: ensure the parent dir and an empty file exist, so
+				// the runtime binds a file rather than auto-creating a directory.
+				if err := os.MkdirAll(filepath.Dir(hostVolumePath), 0755); err != nil {
+					return fmt.Errorf("failed to create host volume directory: %w", err)
+				}
+				if _, err := os.Stat(hostVolumePath); os.IsNotExist(err) {
+					f, err := os.OpenFile(hostVolumePath, os.O_CREATE, 0644)
+					if err != nil {
+						return fmt.Errorf("failed to create host volume file: %w", err)
+					}
+					f.Close()
+				}
+			} else if err := os.MkdirAll(hostVolumePath, 0755); err != nil {
 				return fmt.Errorf("failed to create host volume directory: %w", err)
 			}
-			runtimeArgs = append(runtimeArgs, "-v", fmt.Sprintf("%s:%s%s", hostVolumePath, containerPath, mountSuffix))
+			runtimeArgs = append(runtimeArgs, "-v", fmt.Sprintf("%s:%s%s", hostVolumePath, mount.Path, mountSuffix))
 		}
 
 		// Mount protections (--mp PATH:MODE) overlay a nested mount on top of the

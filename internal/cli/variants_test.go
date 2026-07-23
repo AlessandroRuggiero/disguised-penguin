@@ -31,17 +31,15 @@ func TestLoadVariantsMissingFile(t *testing.T) {
 
 func TestLoadVariants(t *testing.T) {
 	dir := writeVariants(t, `{
-		"variants": [
-			{
-				"of": "claude",
+		"variants": {
+			"claude": {
 				"build_file": "Dockerfile.dev",
 				"local_mounts": {"./secrets": "/secrets"}
 			},
-			{
-				"of": "opencode",
+			"opencode": {
 				"build_file": "Dockerfile.opencode"
 			}
-		]
+		}
 	}`)
 
 	got, err := loadVariants(dir)
@@ -69,9 +67,9 @@ func TestLoadVariantsMalformed(t *testing.T) {
 	}
 }
 
-func TestLoadVariantsMissingOf(t *testing.T) {
-	if _, err := loadVariants(writeVariants(t, `{"variants": [{"build_file": "Dockerfile"}]}`)); err == nil {
-		t.Fatal("expected an error for a variant without 'of'")
+func TestLoadVariantsEmptyCLIName(t *testing.T) {
+	if _, err := loadVariants(writeVariants(t, `{"variants": {"": {"build_file": "Dockerfile"}}}`)); err == nil {
+		t.Fatal("expected an error for a variant with an empty CLI name")
 	}
 }
 

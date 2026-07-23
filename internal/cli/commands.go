@@ -40,6 +40,18 @@ func printKeyValueSection(title string, m map[string]string) {
 	}
 }
 
+func printConfigMounts(mounts map[string]models.ConfigMount) {
+	view := make(map[string]string, len(mounts))
+	for k, v := range mounts {
+		p := v.Path
+		if v.IsFile() {
+			p += " (file)"
+		}
+		view[k] = p
+	}
+	printKeyValueSection("Config mounts", view)
+}
+
 var addCmd = &cobra.Command{
 	Use:               "add [name] [image]",
 	Aliases:           []string{"a"},
@@ -175,7 +187,7 @@ var installCmd = &cobra.Command{
 		}
 		fmt.Printf("Successfully pulled image '%s'\n", pkgToInstall.Image)
 
-		printKeyValueSection("Config mounts", pkgToInstall.ConfigMounts)
+		printConfigMounts(pkgToInstall.ConfigMounts)
 		printKeyValueSection("Port mappings", pkgToInstall.PortMappings)
 
 		if err := store.InstallCLI(name, pkgToInstall); err != nil {
@@ -344,7 +356,7 @@ func updateOne(name string, runtime container.Runtime) error {
 	}
 	fmt.Printf("Successfully pulled latest image '%s'\n", pkgToUpdate.Image)
 
-	printKeyValueSection("Config mounts", pkgToUpdate.ConfigMounts)
+	printConfigMounts(pkgToUpdate.ConfigMounts)
 	printKeyValueSection("Port mappings", pkgToUpdate.PortMappings)
 
 	if err := store.UpdateCLI(name, pkgToUpdate); err != nil {
