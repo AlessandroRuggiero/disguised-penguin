@@ -52,6 +52,17 @@ func printConfigMounts(mounts map[string]models.ConfigMount) {
 	printKeyValueSection("Config mounts", view)
 }
 
+func printExtraRunArgsSection(args []models.ExtraRunArg) {
+	fmt.Println("Extra run args:")
+	if len(args) == 0 {
+		fmt.Println("  (none)")
+		return
+	}
+	for _, arg := range args {
+		fmt.Printf("  - %s -> %s\n", arg, arg.Description)
+	}
+}
+
 var addCmd = &cobra.Command{
 	Use:               "add [name] [image]",
 	Aliases:           []string{"a"},
@@ -151,10 +162,6 @@ var installCmd = &cobra.Command{
 	ValidArgsFunction: cobra.NoFileCompletions,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		runtime, err := container.ResolveRuntime(containerRuntimeFlag)
-		if err != nil {
-			return err
-		}
 		pkgToInstall, exists, err := store.SearchRemotePackageByName(name)
 		if err != nil {
 			suggestions, err := getInstallSuggestions(name)
@@ -177,6 +184,22 @@ var installCmd = &cobra.Command{
 			return fmt.Errorf("CLI '%s' is already installed", name)
 		}
 
+		// Resolved before the prompt so it can name the runtime, but only fatal
+		// at the pull, which is the first step that actually needs one.
+		runtime, runtimeErr := container.ResolveRuntime(containerRuntimeFlag)
+
+		accepted, err := confirmExtraRunArgs(runtime, name, "Continue with install?", pkgToInstall.ExtraRunArgs, installYesFlag)
+		if err != nil {
+			return err
+		}
+		if !accepted {
+			fmt.Println("Aborting install.")
+			return nil
+		}
+		if runtimeErr != nil {
+			return runtimeErr
+		}
+
 		fmt.Printf("Pulling image '%s' for CLI '%s' using %s...\n", pkgToInstall.Image, name, runtime)
 		runtimeCmd := exec.Command(string(runtime), "pull", pkgToInstall.Image)
 		runtimeCmd.Stdout = os.Stdout
@@ -189,6 +212,7 @@ var installCmd = &cobra.Command{
 
 		printConfigMounts(pkgToInstall.ConfigMounts)
 		printKeyValueSection("Port mappings", pkgToInstall.PortMappings)
+		printExtraRunArgsSection(pkgToInstall.ExtraRunArgs)
 
 		if err := store.InstallCLI(name, pkgToInstall); err != nil {
 			return fmt.Errorf("failed to insert CLI into db: %w", err)
@@ -337,13 +361,43 @@ var registryRemoveCmd = &cobra.Command{
 	},
 }
 
-func updateOne(name string, runtime container.Runtime) error {
+func extraRunArgsEqual(a, b []models.ExtraRunArg) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Description != b[i].Description || a[i].String() != b[i].String() {
+			return false
+		}
+	}
+	return true
+}
+
+func updateOne(name string, runtime container.Runtime, assumeYes bool) error {
 	pkgToUpdate, exists, err := store.SearchRemotePackageByName(name)
 	if err != nil {
 		return fmt.Errorf("failed to search remote package: %w", err)
 	}
 	if !exists {
 		return fmt.Errorf("package '%s' not found in any remote registry", name)
+	}
+	installed, err := store.GetCliByName(name)
+	if err != nil {
+		return err
+	}
+	if !extraRunArgsEqual(installed.ExtraRunArgs, pkgToUpdate.ExtraRunArgs) {
+		fmt.Printf("\nExtra run args for '%s' changed since it was installed.\nCurrently accepted:\n", name)
+		printExtraRunArgsSection(installed.ExtraRunArgs)
+		if len(pkgToUpdate.ExtraRunArgs) == 0 {
+			fmt.Println("The package no longer requests any; they will be dropped.")
+		}
+		accepted, err := confirmExtraRunArgs(runtime, name, "Accept the new extra run args and continue with update?", pkgToUpdate.ExtraRunArgs, assumeYes)
+		if err != nil {
+			return err
+		}
+		if !accepted {
+			return fmt.Errorf("declined the new extra run args for '%s'; it was left unchanged", name)
+		}
 	}
 
 	fmt.Printf("Pulling latest image '%s' for CLI '%s' using %s...\n", pkgToUpdate.Image, name, runtime)
@@ -358,6 +412,7 @@ func updateOne(name string, runtime container.Runtime) error {
 
 	printConfigMounts(pkgToUpdate.ConfigMounts)
 	printKeyValueSection("Port mappings", pkgToUpdate.PortMappings)
+	printExtraRunArgsSection(pkgToUpdate.ExtraRunArgs)
 
 	if err := store.UpdateCLI(name, pkgToUpdate); err != nil {
 		return fmt.Errorf("failed to update CLI in db: %w", err)
@@ -393,7 +448,7 @@ var updateCmd = &cobra.Command{
 		}
 
 		if len(args) == 1 {
-			return updateOne(args[0], runtime)
+			return updateOne(args[0], runtime, updateYesFlag)
 		}
 
 		clis, err := store.ListCLIs()
@@ -408,7 +463,7 @@ var updateCmd = &cobra.Command{
 		var failed []string
 		for i, c := range clis {
 			fmt.Printf("[%d/%d] Updating '%s'...\n", i+1, len(clis), c.Name)
-			if err := updateOne(c.Name, runtime); err != nil {
+			if err := updateOne(c.Name, runtime, updateYesFlag); err != nil {
 				fmt.Fprintf(os.Stderr, "Failed to update '%s': %v\n", c.Name, err)
 				failed = append(failed, c.Name)
 			}

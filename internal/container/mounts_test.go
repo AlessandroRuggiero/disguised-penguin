@@ -32,14 +32,14 @@ func TestParseProtection_Valid(t *testing.T) {
 
 func TestParseProtection_Invalid(t *testing.T) {
 	cases := []string{
-		".git",             // no mode
-		".git:",            // empty mode
-		":ro",              // empty path
-		".git:xx",          // bad mode
-		"/etc/passwd:ro",   // absolute
-		"../secrets:ro",    // escapes workspace
-		"../../x:h",        // escapes workspace
-		".:ro",             // workspace root
+		".git",           // no mode
+		".git:",          // empty mode
+		":ro",            // empty path
+		".git:xx",        // bad mode
+		"/etc/passwd:ro", // absolute
+		"../secrets:ro",  // escapes workspace
+		"../../x:h",      // escapes workspace
+		".:ro",           // workspace root
 	}
 	for _, spec := range cases {
 		if _, err := ParseProtection(spec); err == nil {

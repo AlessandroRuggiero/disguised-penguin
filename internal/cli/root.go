@@ -12,6 +12,7 @@ import (
 
 	"disguised-penguin/internal/container"
 	"disguised-penguin/internal/db"
+	"disguised-penguin/internal/models"
 	"disguised-penguin/internal/remote"
 	"disguised-penguin/internal/workspace"
 
@@ -23,6 +24,12 @@ var store *db.Store
 var Version = "dev"
 
 var containerRuntimeFlag string
+
+// --yes on install/update: accept a package's extra run args unprompted.
+var (
+	installYesFlag bool
+	updateYesFlag  bool
+)
 
 func SetupBindings(dbStore *db.Store) {
 	store = dbStore
@@ -265,6 +272,15 @@ var rootCmd = &cobra.Command{
 		for hostPort, containerPort := range cli.PortMappings {
 			runtimeArgs = append(runtimeArgs, "-p", fmt.Sprintf("%s:%s", hostPort, containerPort))
 		}
+
+		// The package's own runtime options, accepted by the user at install
+		// time. They go after everything dp generates, so a package can
+		// override a flag we set (e.g. --network), and before the image, so no
+		// token can be mistaken for the image name or the in-container
+		// command. models.ExtraRunArg rejects non-flag leading tokens on
+		// decode, which is what makes that second guarantee hold.
+		runtimeArgs = append(runtimeArgs, models.ExtraRunArgsFlat(cli.ExtraRunArgs)...)
+
 		if isVariant {
 			// If the CLI is a variant, check if it has already been built
 			built, err := isVariantBuilt(runtime, cli.Image, cwd)
@@ -302,6 +318,9 @@ func Execute() error {
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&containerRuntimeFlag, "runtime", string(container.RuntimeAuto), "Container runtime to use: auto, docker, podman (also supports env DP_CONTAINER_RUNTIME)")
+
+	installCmd.Flags().BoolVarP(&installYesFlag, "yes", "y", false, "Accept the package's extra run args without prompting")
+	updateCmd.Flags().BoolVarP(&updateYesFlag, "yes", "y", false, "Accept changes to the package's extra run args without prompting")
 
 	rootCmd.AddCommand(installCompletionsCmd)
 	rootCmd.AddCommand(addCmd)

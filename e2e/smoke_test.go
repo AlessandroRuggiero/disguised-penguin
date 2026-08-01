@@ -9,6 +9,9 @@
 package e2e
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -329,5 +332,88 @@ func TestEraseDB(t *testing.T) {
 	mustOK(t, "Successfully erased", out, code)
 	if _, err := os.Stat(dbFile); !os.IsNotExist(err) {
 		t.Fatalf("db should be gone after confirmed erase; stat err = %v", err)
+	}
+}
+
+// localRegistry serves a pkgs.json/info.json pair over loopback so install can
+// be exercised without reaching the real registry. The "github" registry type
+// is just an HTTP GET of "<uri>/<file>", so a plain test server is enough.
+func localRegistry(t *testing.T, pkgsJSON string) string {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/info.json", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"default_name": "test-registry", "description": "smoke test registry"}`)
+	})
+	mux.HandleFunc("/pkgs.json", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, pkgsJSON)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+// A package asking for extra runtime args must not be installed silently when
+// there is nobody to accept them.
+func TestInstallExtraRunArgsRefusedWithoutAnswer(t *testing.T) {
+	data := t.TempDir()
+	uri := localRegistry(t, `{
+		"risky": {
+			"container": "docker.io/library/hello:latest",
+			"extra_run_args": [
+				{"args": ["--cap-add", "SYS_PTRACE"], "description": "attach to processes"}
+			]
+		}
+	}`)
+
+	// dp registry remove <default URI>   (keep the lookup offline)
+	out, code := run(t, data, "registry", "remove", defaultRegistryURI)
+	mustOK(t, "Successfully removed registry", out, code)
+
+	// dp registry add <local uri> github 10 local
+	out, code = run(t, data, "registry", "add", uri, "github", "10", "local")
+	mustOK(t, "Successfully added registry", out, code)
+
+	// dp install risky   (nothing on stdin, as in a script or CI)
+	out, code = run(t, data, "install", "risky")
+	mustFail(t, "Re-run with --yes", out, code)
+	// The flags themselves are still shown, so the log says what was refused.
+	if !strings.Contains(out, "--cap-add SYS_PTRACE") {
+		t.Fatalf("output should list the requested args; got:\n%s", out)
+	}
+	if !strings.Contains(out, "attach to processes") {
+		t.Fatalf("output should list the arg descriptions; got:\n%s", out)
+	}
+
+	// dp list   (nothing was installed, and the image was never pulled)
+	out, _ = run(t, data, "list")
+	if strings.Contains(out, "risky") {
+		t.Fatalf("refused package should not be installed:\n%s", out)
+	}
+}
+
+// A malformed manifest is rejected at fetch time rather than producing a CLI
+// that fails later at container start.
+func TestInstallExtraRunArgsMissingDescription(t *testing.T) {
+	data := t.TempDir()
+	uri := localRegistry(t, `{
+		"sloppy": {
+			"container": "docker.io/library/hello:latest",
+			"extra_run_args": [{"args": ["--privileged"]}]
+		}
+	}`)
+
+	// dp registry remove <default URI>
+	out, code := run(t, data, "registry", "remove", defaultRegistryURI)
+	mustOK(t, "Successfully removed registry", out, code)
+
+	// dp registry add <local uri> github 10 local
+	out, code = run(t, data, "registry", "add", uri, "github", "10", "local")
+	mustOK(t, "Successfully added registry", out, code)
+
+	// dp install sloppy
+	out, code = run(t, data, "install", "sloppy")
+	mustFail(t, "not found in any remote registry", out, code)
+	if !strings.Contains(out, "missing \"description\"") {
+		t.Fatalf("output should explain the manifest problem; got:\n%s", out)
 	}
 }

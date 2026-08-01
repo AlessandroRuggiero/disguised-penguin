@@ -85,6 +85,8 @@ dp install <package-name>
 
 This pulls the container image and registers the CLI locally.
 
+If the package requests [extra run args](#extra-run-args), `dp` shows them with their descriptions and asks you to accept them before pulling anything. Use `--yes`/`-y` to skip the prompt.
+
 ### Container runtime (Docker/Podman)
 
 By default, `dp` auto-detects a container runtime (prefers Docker if present, otherwise Podman).
@@ -130,6 +132,8 @@ Updates the CLI package locally by pulling the latest mapped container image.
 dp update
 ```
 Updates every installed CLI. Failures for individual CLIs are reported but don't stop the rest from updating.
+
+If a package's [extra run args](#extra-run-args) changed since you accepted them, `dp` shows the old and new lists and asks again; declining leaves that CLI untouched. `--yes`/`-y` accepts the changes without prompting.
 
 ### Update `dp` itself
 
@@ -308,6 +312,41 @@ A package's `configmounts` maps a volume name to a container path. A value can b
 ```
 
 Each is a persistent host path under `.../volumes/<cli>/<volume>` and is created automatically (an empty directory, or an empty file for `type: file`).
+
+### Extra run args
+
+Some CLIs need runtime options that `dp` does not model. A package can request them with `extra_run_args`, and every entry **must** explain itself:
+
+```json
+"extra_run_args": [
+  {
+    "args": ["--cap-add", "SYS_PTRACE"],
+    "description": "Lets the debugger attach to processes inside the container"
+  },
+  {
+    "args": ["--network=host"],
+    "description": "Needed to reach services running on your machine"
+  }
+]
+```
+
+The tokens are handed straight to `docker run` / `podman run`, immediately before the image name. Because they can weaken the container's isolation from your machine, `dp install` prints the whole list with its descriptions and asks you to accept it **before** pulling the image:
+
+```
+Warning: 'debugger' requests extra options for 'docker run':
+
+  --cap-add SYS_PTRACE
+      Lets the debugger attach to processes inside the container
+
+These are passed to docker every time you run 'debugger' and may weaken
+the container's isolation from your machine.
+
+Continue with install? (y/N):
+```
+
+`dp update` re-asks only when the list has changed since you accepted it. Pass `--yes`/`-y` to accept without prompting; in a script or CI, where nothing answers the prompt, `dp` refuses and tells you to use that flag rather than accepting silently.
+
+The name is a warning in itself: prefer `configmounts` and `portmappings`, and reach for `extra_run_args` only when nothing else expresses what the CLI needs. Each entry must start with a flag, so a manifest cannot smuggle in an image name or a command.
 
 ## Requirements
 - Platforms: Linux (amd64), macOS (amd64/arm64), and Windows (amd64)

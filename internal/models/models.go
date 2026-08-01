@@ -3,6 +3,7 @@ package models
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 type RegistryType string
@@ -17,6 +18,7 @@ type CLI struct {
 	Image        string
 	ConfigMounts map[string]ConfigMount
 	PortMappings map[string]string
+	ExtraRunArgs []ExtraRunArg
 }
 
 type RemotePackage struct {
@@ -24,6 +26,59 @@ type RemotePackage struct {
 	Image        string                 `json:"container"`
 	ConfigMounts map[string]ConfigMount `json:"configmounts,omitempty"`
 	PortMappings map[string]string      `json:"portmappings,omitempty"`
+	ExtraRunArgs []ExtraRunArg          `json:"extra_run_args,omitempty"`
+}
+
+type ExtraRunArg struct {
+	Args        []string `json:"args"`
+	Description string   `json:"description"`
+}
+
+func (a ExtraRunArg) String() string { return strings.Join(a.Args, " ") }
+
+func (a *ExtraRunArg) UnmarshalJSON(data []byte) error {
+	// rawArg has the same fields but no custom UnmarshalJSON, so decoding into
+	// it doesn't recurse back here.
+	type rawArg ExtraRunArg
+	var r rawArg
+	if err := json.Unmarshal(data, &r); err != nil {
+		return fmt.Errorf("extra run arg must be a {args, description} object: %w", err)
+	}
+	if len(r.Args) == 0 {
+		return fmt.Errorf("extra run arg is missing \"args\"")
+	}
+	for _, arg := range r.Args {
+		if strings.TrimSpace(arg) == "" {
+			return fmt.Errorf("extra run arg %q contains an empty token", strings.Join(r.Args, " "))
+		}
+	}
+	// Only flags are allowed
+	if !strings.HasPrefix(r.Args[0], "-") {
+		return fmt.Errorf("extra run arg must start with a flag, got %q", r.Args[0])
+	}
+	if strings.TrimSpace(r.Description) == "" {
+		return fmt.Errorf("extra run arg %q is missing \"description\"", strings.Join(r.Args, " "))
+	}
+	*a = ExtraRunArg(r)
+	return nil
+}
+
+// ExtraRunArgsFlat flattens the entries into the token slice passed to exec.
+// Sized in one pass first so the result is a single allocation, and nil when
+// there is nothing to add (appending nil... is a no-op at the call site).
+func ExtraRunArgsFlat(args []ExtraRunArg) []string {
+	n := 0
+	for _, a := range args {
+		n += len(a.Args)
+	}
+	if n == 0 {
+		return nil
+	}
+	flat := make([]string, 0, n)
+	for _, a := range args {
+		flat = append(flat, a.Args...)
+	}
+	return flat
 }
 
 type ConfigMount struct {
