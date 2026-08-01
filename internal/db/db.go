@@ -132,7 +132,8 @@ func (s *Store) GetCliByName(name string) (*models.CLI, error) {
 	var cli models.CLI
 	var configMountsStr string
 	var portMappingsStr string
-	err := s.db.QueryRow(`SELECT id, name, container_name, config_mounts, port_mappings FROM clis WHERE name = ?`, name).Scan(&cli.ID, &cli.Name, &cli.Image, &configMountsStr, &portMappingsStr)
+	var extraRunArgsStr sql.NullString
+	err := s.db.QueryRow(`SELECT id, name, container_name, config_mounts, port_mappings, extra_run_args FROM clis WHERE name = ?`, name).Scan(&cli.ID, &cli.Name, &cli.Image, &configMountsStr, &portMappingsStr, &extraRunArgsStr)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("CLI '%s' not found in database.\nSuggestion: Use 'dp list' to see available CLIs or 'dp install %s' to install it from the remote repository", name, name)
 	}
@@ -144,6 +145,12 @@ func (s *Store) GetCliByName(name string) (*models.CLI, error) {
 	}
 	if err := json.Unmarshal([]byte(portMappingsStr), &cli.PortMappings); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal port mappings: %w", err)
+	}
+	// NULL is the normal case (the package asked for nothing extra)
+	if extraRunArgsStr.Valid && extraRunArgsStr.String != "" {
+		if err := json.Unmarshal([]byte(extraRunArgsStr.String), &cli.ExtraRunArgs); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal extra run args: %w", err)
+		}
 	}
 	return &cli, nil
 }
@@ -161,16 +168,31 @@ func (s *Store) RemoveCLI(name string) (int64, error) {
 	return result.RowsAffected()
 }
 
-func (s *Store) InstallCLI(name string, pkg *models.RemotePackage) error {
+func marshalPackage(pkg *models.RemotePackage) (configMounts, portMappings string, extraRunArgs sql.NullString, err error) {
 	configMountsBytes, err := json.Marshal(pkg.ConfigMounts)
 	if err != nil {
-		return fmt.Errorf("failed to marshal config mounts: %w", err)
+		return "", "", extraRunArgs, fmt.Errorf("failed to marshal config mounts: %w", err)
 	}
 	portMappingsBytes, err := json.Marshal(pkg.PortMappings)
 	if err != nil {
-		return fmt.Errorf("failed to marshal port mappings: %w", err)
+		return "", "", extraRunArgs, fmt.Errorf("failed to marshal port mappings: %w", err)
 	}
-	_, err = s.db.Exec(`INSERT INTO clis (name, container_name, config_mounts, port_mappings) VALUES (?, ?, ?, ?)`, name, pkg.Image, string(configMountsBytes), string(portMappingsBytes))
+	if len(pkg.ExtraRunArgs) > 0 {
+		extraRunArgsBytes, err := json.Marshal(pkg.ExtraRunArgs)
+		if err != nil {
+			return "", "", extraRunArgs, fmt.Errorf("failed to marshal extra run args: %w", err)
+		}
+		extraRunArgs = sql.NullString{String: string(extraRunArgsBytes), Valid: true}
+	}
+	return string(configMountsBytes), string(portMappingsBytes), extraRunArgs, nil
+}
+
+func (s *Store) InstallCLI(name string, pkg *models.RemotePackage) error {
+	configMounts, portMappings, extraRunArgs, err := marshalPackage(pkg)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`INSERT INTO clis (name, container_name, config_mounts, port_mappings, extra_run_args) VALUES (?, ?, ?, ?, ?)`, name, pkg.Image, configMounts, portMappings, extraRunArgs)
 	return err
 }
 
@@ -271,15 +293,11 @@ func (s *Store) AddRegistry(uri string, registryType models.RegistryType, priori
 }
 
 func (s *Store) UpdateCLI(name string, pkg *models.RemotePackage) error {
-	configMountsBytes, err := json.Marshal(pkg.ConfigMounts)
+	configMounts, portMappings, extraRunArgs, err := marshalPackage(pkg)
 	if err != nil {
-		return fmt.Errorf("failed to marshal config mounts: %w", err)
+		return err
 	}
-	portMappingsBytes, err := json.Marshal(pkg.PortMappings)
-	if err != nil {
-		return fmt.Errorf("failed to marshal port mappings: %w", err)
-	}
-	_, err = s.db.Exec(`UPDATE clis SET container_name = ?, config_mounts = ?, port_mappings = ? WHERE name = ?`, pkg.Image, string(configMountsBytes), string(portMappingsBytes), name)
+	_, err = s.db.Exec(`UPDATE clis SET container_name = ?, config_mounts = ?, port_mappings = ?, extra_run_args = ? WHERE name = ?`, pkg.Image, configMounts, portMappings, extraRunArgs, name)
 	return err
 }
 
