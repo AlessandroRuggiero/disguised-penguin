@@ -315,7 +315,7 @@ Each is a persistent host path under `.../volumes/<cli>/<volume>` and is created
 
 ### Extra run args
 
-Some CLIs need runtime options that `dp` does not model — a capability, a device, host networking. A package can request them with `extra_run_args`, and every entry **must** explain itself:
+Some CLIs need runtime options that `dp` does not model. A package can request them with `extra_run_args`, and every entry **must** explain itself:
 
 ```json
 "extra_run_args": [
