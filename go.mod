@@ -5,7 +5,7 @@ go 1.25.0
 require (
 	github.com/creack/pty v1.1.24
 	github.com/spf13/cobra v1.10.2
-	modernc.org/sqlite v1.54.0
+	modernc.org/sqlite v1.55.0
 )
 
 require (
