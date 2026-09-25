@@ -125,3 +125,52 @@ func TestLoadVariantsDuplicateOf(t *testing.T) {
 		t.Fatal("expected an error for two variants of the same CLI")
 	}
 }
+
+func TestWriteFileIfMissingKeepsExisting(t *testing.T) {
+	p := filepath.Join(t.TempDir(), ".dp", "README.md")
+
+	created, err := writeFileIfMissing(p, "first")
+	if err != nil || !created {
+		t.Fatalf("expected the file to be created, got created=%v err=%v", created, err)
+	}
+	created, err = writeFileIfMissing(p, "second")
+	if err != nil || created {
+		t.Fatalf("expected the existing file to be kept, got created=%v err=%v", created, err)
+	}
+	if got, _ := os.ReadFile(p); string(got) != "first" {
+		t.Fatalf("expected the original content, got %q", got)
+	}
+}
+
+func TestDescribeOSRelease(t *testing.T) {
+	cases := map[string]struct {
+		content string
+		want    string
+	}{
+		"fedora": {
+			content: "NAME=\"Fedora Linux\"\nID=fedora\nPRETTY_NAME=\"Fedora Linux 42 (Container Image)\"\n",
+			want:    "Fedora Linux 42 (Container Image) (install packages with dnf)",
+		},
+		"debian": {
+			content: "PRETTY_NAME=\"Debian GNU/Linux 12 (bookworm)\"\nNAME=\"Debian GNU/Linux\"\nID=debian\n",
+			want:    "Debian GNU/Linux 12 (bookworm) (install packages with apt-get)",
+		},
+		"id like": {
+			content: "NAME='Rocky Linux'\nID=\"rocky\"\nID_LIKE=\"rhel centos fedora\"\n",
+			want:    "Rocky Linux (install packages with dnf)",
+		},
+		"unknown distro": {
+			content: "NAME=Wolfi\nID=wolfi\n",
+			want:    "Wolfi",
+		},
+		"no name": {
+			content: "# nothing useful\nID=debian\n",
+			want:    "",
+		},
+	}
+	for name, c := range cases {
+		if got := describeOSRelease(c.content); got != c.want {
+			t.Errorf("%s: got %q, want %q", name, got, c.want)
+		}
+	}
+}

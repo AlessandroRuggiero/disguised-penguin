@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -123,28 +124,89 @@ func isVariantBuilt(runtime container.Runtime, baseImage string, projectDir stri
 	return len(bytes.TrimSpace(out)) > 0, nil
 }
 
-// writeVariantDockerfile scaffolds a build file starting FROM the CLI's image.
-// It returns false if the file already exists, which is left untouched.
-func writeVariantDockerfile(buildFile string, baseImage string) (bool, error) {
-	if err := os.MkdirAll(filepath.Dir(buildFile), 0755); err != nil {
-		return false, fmt.Errorf("failed to create %s: %w", filepath.Dir(buildFile), err)
+const dpReadmeFile = ".dp/README.md"
+
+//go:embed dpreadme.md
+var dpReadme string
+
+func writeFileIfMissing(p string, content string) (bool, error) {
+	if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+		return false, fmt.Errorf("failed to create %s: %w", filepath.Dir(p), err)
 	}
 
 	// O_EXCL so an existing file can't be clobbered.
-	f, err := os.OpenFile(buildFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+	f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
 	if os.IsExist(err) {
 		return false, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("failed to create %s: %w", buildFile, err)
+		return false, fmt.Errorf("failed to create %s: %w", p, err)
 	}
 	defer f.Close()
 
-	content := fmt.Sprintf("FROM %s\n\n# Add what this project needs on top of the base image.\n", baseImage)
 	if _, err := f.WriteString(content); err != nil {
-		return false, fmt.Errorf("failed to write %s: %w", buildFile, err)
+		return false, fmt.Errorf("failed to write %s: %w", p, err)
 	}
 	return true, nil
+}
+
+// writeVariantDockerfile scaffolds a build file starting FROM the CLI's image.
+// It returns false if the file already exists, which is left untouched.
+func writeVariantDockerfile(buildFile string, baseImage string, baseOS string) (bool, error) {
+	content := fmt.Sprintf("FROM %s\n\n", baseImage)
+	if baseOS != "" {
+		content += fmt.Sprintf("# Base OS: %s\n", baseOS)
+	}
+	content += "# Add what this project needs on top of the base image.\n# See .dp/README.md for what you can do here.\n"
+	return writeFileIfMissing(buildFile, content)
+}
+
+func detectBaseOS(runtime container.Runtime, image string) (string, error) {
+	cmd := exec.Command(string(runtime), "run", "--rm", "--pull=never", "--entrypoint", "cat", image, "/etc/os-release")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to read /etc/os-release from '%s': %w: %s", image, err, strings.TrimSpace(stderr.String()))
+	}
+	return describeOSRelease(string(out)), nil
+}
+
+var packageManagers = map[string]string{
+	"debian":   "apt-get",
+	"ubuntu":   "apt-get",
+	"fedora":   "dnf",
+	"rhel":     "dnf",
+	"alpine":   "apk",
+	"suse":     "zypper",
+	"opensuse": "zypper",
+	"arch":     "pacman",
+}
+
+func describeOSRelease(content string) string {
+	fields := map[string]string{}
+	for _, line := range strings.Split(content, "\n") {
+		key, value, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if !ok || strings.HasPrefix(key, "#") {
+			continue
+		}
+		fields[key] = strings.Trim(value, `"'`)
+	}
+
+	name := fields["PRETTY_NAME"]
+	if name == "" {
+		name = fields["NAME"]
+	}
+	if name == "" {
+		return ""
+	}
+
+	for _, id := range append([]string{fields["ID"]}, strings.Fields(fields["ID_LIKE"])...) {
+		if pm, ok := packageManagers[id]; ok {
+			return fmt.Sprintf("%s (install packages with %s)", name, pm)
+		}
+	}
+	return name
 }
 
 // variantNames lists the CLIs this project declares a variant for.
@@ -317,7 +379,15 @@ var localVariantExtendCmd = &cobra.Command{
 		}
 
 		// Build file first: it's the half worth keeping if the next write fails.
-		created, err := writeVariantDockerfile(buildFile, cli.Image)
+		baseOS := ""
+		runtime, err := container.ResolveRuntime(containerRuntimeFlag)
+		if err == nil {
+			baseOS, err = detectBaseOS(runtime, cli.Image)
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not detect the base OS: %v\n", err)
+		}
+		created, err := writeVariantDockerfile(buildFile, cli.Image, baseOS)
 		if err != nil {
 			return err
 		}
@@ -329,6 +399,9 @@ var localVariantExtendCmd = &cobra.Command{
 		err = os.WriteFile(variantsFile, data, 0644)
 		if err != nil {
 			return fmt.Errorf("failed to write variants file: %w", err)
+		}
+		if _, err := writeFileIfMissing(dpReadmeFile, dpReadme); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 		}
 		fmt.Printf("Declared variant for CLI %s in %s\n", args[0], variantsFile)
 		if created {

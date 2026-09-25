@@ -259,7 +259,7 @@ With the file above, `.dp/secrets` appears at `/workspace/config/secrets` read-o
 
 When the same destination is targeted from more than one place, the effective priority is **workspace-level protections → `.dp/mounts.json` → `--mp` args**, so a per-run `--mp` always wins.
 
-The `.dp/` directory itself is dp's control plane (build files, `variants.json`, `mounts.json`) and is consumed on the host, so it is mounted **read-only** by default — a sandboxed tool can't tamper with the recipes that govern future runs. This is the lowest-priority overlay, so a `.dp/mounts.json` entry or a `--mp .dp/...:rw` can still re-open a subpath if you really need it writable.
+The `.dp/` directory itself is dp's control plane (build files, `variants.json`, `mounts.json`, and a `README.md` guide that `dp local variant extend` writes once) and is consumed on the host, so it is mounted **read-only** by default, so a sandboxed tool can't tamper with the recipes that govern future runs. This is the lowest-priority overlay, so a `.dp/mounts.json` entry or a `--mp .dp/...:rw` can still re-open a subpath if you really need it writable.
 
 ### Database Management
 
