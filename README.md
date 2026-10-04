@@ -108,6 +108,33 @@ dp <cli-name> [args...]
 
 Your current working directory is mounted as `/workspace` inside the container.
 
+### Run CLIs without the `dp` prefix
+
+`dp` can define shell aliases so you can type `opencode` instead of `dp opencode`. Which CLIs get an alias is controlled by the `alias_mode` [setting](#settings):
+
+| Value | Name   | Effect                                       |
+|-------|--------|----------------------------------------------|
+| `0`   | `none` | no aliases (default)                         |
+| `1`   | `some` | only CLIs enabled with `dp alias add <cli>`  |
+| `2`   | `all`  | every installed CLI                          |
+
+```bash
+# Alias every installed CLI
+dp settings set alias_mode all
+
+# Or pick individual CLIs
+dp settings set alias_mode some
+dp alias add opencode
+dp alias remove opencode
+
+# Show which CLIs are aliased right now
+dp alias list
+```
+
+The aliases are printed together with the completion script, so they are loaded by the same line [`dp install-completions`](#enabling-autocompletion) adds to your shell profile. They are rebuilt every time a shell starts, so installs, removals and setting changes take effect in the next shell you open.
+
+Aliases only exist in interactive shells (not in scripts or other programs), and they take precedence over a host command with the same name; `dp alias add` and `dp alias list` tell you when that happens. CLI names that aren't safe to use as a shell alias are skipped.
+
 ### Add a CLI manually
 
 ```bash
@@ -260,6 +287,23 @@ With the file above, `.dp/secrets` appears at `/workspace/config/secrets` read-o
 When the same destination is targeted from more than one place, the effective priority is **workspace-level protections → `.dp/mounts.json` → `--mp` args**, so a per-run `--mp` always wins.
 
 The `.dp/` directory itself is dp's control plane (build files, `variants.json`, `mounts.json`, and a `README.md` guide that `dp local variant extend` writes once) and is consumed on the host, so it is mounted **read-only** by default, so a sandboxed tool can't tamper with the recipes that govern future runs. This is the lowest-priority overlay, so a `.dp/mounts.json` entry or a `--mp .dp/...:rw` can still re-open a subpath if you really need it writable.
+
+### Settings
+
+Global settings are stored in the database. Each setting takes one of a fixed set of values, which you can pass by name or by number.
+
+```bash
+# List every setting with its current and allowed values
+dp settings list
+
+# Read or change a setting
+dp settings get alias_mode
+dp settings set alias_mode all   # same as: dp settings set alias_mode 2
+```
+
+| Setting      | Values                                   | Default |
+|--------------|------------------------------------------|---------|
+| `alias_mode` | `none` (0), `some` (1), `all` (2): see [Run CLIs without the `dp` prefix](#run-clis-without-the-dp-prefix) | `none` |
 
 ### Database Management
 

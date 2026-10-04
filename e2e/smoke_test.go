@@ -417,3 +417,70 @@ func TestInstallExtraRunArgsMissingDescription(t *testing.T) {
 		t.Fatalf("output should explain the manifest problem; got:\n%s", out)
 	}
 }
+
+func TestSettingsGetSet(t *testing.T) {
+	data := t.TempDir()
+
+	// dp settings get alias_mode
+	out, code := run(t, data, "settings", "get", "alias_mode")
+	mustOK(t, "none (0)", out, code)
+
+	// dp settings set alias_mode all
+	out, code = run(t, data, "settings", "set", "alias_mode", "all")
+	mustOK(t, "Set alias_mode to all (2)", out, code)
+
+	// dp settings set alias_mode 1
+	out, code = run(t, data, "settings", "set", "alias_mode", "1")
+	mustOK(t, "Set alias_mode to some (1)", out, code)
+
+	// dp settings list
+	out, code = run(t, data, "settings", "list")
+	mustOK(t, "alias_mode = some (1)", out, code)
+
+	// dp settings set alias_mode 9
+	out, code = run(t, data, "settings", "set", "alias_mode", "9")
+	mustFail(t, "invalid value", out, code)
+
+	// dp settings get nope
+	out, code = run(t, data, "settings", "get", "nope")
+	mustFail(t, "unknown setting", out, code)
+}
+
+func TestAliasesInCompletion(t *testing.T) {
+	data := t.TempDir()
+	run(t, data, "add", "foo", "img-foo")
+	run(t, data, "add", "bar", "img-bar")
+
+	// alias_mode defaults to none: plain completion script, no aliases.
+	out, code := run(t, data, "completion", "bash")
+	mustOK(t, "bash completion V2 for dp", out, code)
+	if strings.Contains(out, "alias ") {
+		t.Fatalf("unexpected aliases with alias_mode none:\n%s", out)
+	}
+
+	// some: only CLIs enabled with dp alias add
+	run(t, data, "settings", "set", "alias_mode", "some")
+	out, code = run(t, data, "alias", "add", "foo")
+	mustOK(t, "Enabled alias for 'foo'", out, code)
+	out, code = run(t, data, "completion", "bash")
+	mustOK(t, "alias foo='dp foo'", out, code)
+	if strings.Contains(out, "alias bar=") {
+		t.Fatalf("bar should not be aliased in some mode:\n%s", out)
+	}
+	out, code = run(t, data, "alias", "list")
+	mustOK(t, "- foo", out, code)
+
+	// all: every CLI, for every shell
+	run(t, data, "settings", "set", "alias_mode", "all")
+	out, code = run(t, data, "completion", "zsh")
+	mustOK(t, "alias bar='dp bar'", out, code)
+	mustOK(t, "#compdef dp", out, code)
+	out, code = run(t, data, "completion", "powershell")
+	mustOK(t, "function foo { dp foo @args }", out, code)
+	out, code = run(t, data, "completion", "fish")
+	mustOK(t, "alias bar 'dp bar'", out, code)
+
+	// dp alias add missing
+	out, code = run(t, data, "alias", "add", "missing")
+	mustFail(t, "not installed", out, code)
+}

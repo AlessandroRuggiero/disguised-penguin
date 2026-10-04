@@ -227,3 +227,69 @@ func TestMigrationAddsExtraRunArgsToExistingDB(t *testing.T) {
 		t.Errorf("expected no extra run args on a migrated row, got %v", cli.ExtraRunArgs)
 	}
 }
+
+func TestSettingsDefaultAndRoundTrip(t *testing.T) {
+	store := newTestStore(t)
+
+	// Seeded by migration 004.
+	got, err := store.GetSetting(models.SettingAliasMode)
+	if err != nil {
+		t.Fatalf("GetSetting: %v", err)
+	}
+	if got != int(models.AliasNone) {
+		t.Fatalf("alias_mode default: got %d, want %d", got, models.AliasNone)
+	}
+
+	for _, want := range []models.AliasMode{models.AliasAll, models.AliasSome} {
+		if err := store.SetSetting(models.SettingAliasMode, int(want)); err != nil {
+			t.Fatalf("SetSetting(%d): %v", want, err)
+		}
+		got, err := store.GetSetting(models.SettingAliasMode)
+		if err != nil {
+			t.Fatalf("GetSetting: %v", err)
+		}
+		if got != int(want) {
+			t.Errorf("alias_mode: got %d, want %d", got, want)
+		}
+	}
+
+	// A missing row falls back to the registered default.
+	if _, err := store.db.Exec(`DELETE FROM settings`); err != nil {
+		t.Fatalf("clear settings: %v", err)
+	}
+	if got, err := store.GetSetting(models.SettingAliasMode); err != nil || got != int(models.AliasNone) {
+		t.Errorf("missing row: got %d, %v", got, err)
+	}
+
+	if _, err := store.GetSetting("nope"); err == nil {
+		t.Errorf("expected error for unknown setting")
+	}
+}
+
+func TestSetCLIAlias(t *testing.T) {
+	store := newTestStore(t)
+
+	if err := store.AddCLI("tool", "img"); err != nil {
+		t.Fatalf("AddCLI: %v", err)
+	}
+	aliasOf := func() bool {
+		t.Helper()
+		clis, err := store.ListCLIs()
+		if err != nil || len(clis) != 1 {
+			t.Fatalf("ListCLIs: %v %v", clis, err)
+		}
+		return clis[0].Alias
+	}
+	if aliasOf() {
+		t.Fatalf("new CLI should not be aliased")
+	}
+	if n, err := store.SetCLIAlias("tool", true); err != nil || n != 1 {
+		t.Fatalf("SetCLIAlias: %d, %v", n, err)
+	}
+	if !aliasOf() {
+		t.Errorf("expected alias to be enabled")
+	}
+	if n, err := store.SetCLIAlias("missing", true); err != nil || n != 0 {
+		t.Errorf("SetCLIAlias(missing): %d, %v", n, err)
+	}
+}

@@ -202,7 +202,7 @@ func (s *Store) EraseDB() error {
 }
 
 func (s *Store) ListCLIs() ([]models.CLI, error) {
-	rows, err := s.db.Query(`SELECT name, container_name FROM clis`)
+	rows, err := s.db.Query(`SELECT name, container_name, alias FROM clis`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query CLIs: %w", err)
 	}
@@ -211,12 +211,43 @@ func (s *Store) ListCLIs() ([]models.CLI, error) {
 	var clis []models.CLI
 	for rows.Next() {
 		var name, image string
-		if err := rows.Scan(&name, &image); err != nil {
+		var alias bool
+		if err := rows.Scan(&name, &image, &alias); err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
-		clis = append(clis, models.CLI{Name: name, Image: image})
+		clis = append(clis, models.CLI{Name: name, Image: image, Alias: alias})
 	}
 	return clis, nil
+}
+
+func (s *Store) SetCLIAlias(name string, enabled bool) (int64, error) {
+	result, err := s.db.Exec(`UPDATE clis SET alias = ? WHERE name = ?`, enabled, name)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+// GetSetting returns the stored value, or the setting's default if no row exists.
+func (s *Store) GetSetting(key models.SettingKey) (int, error) {
+	def, ok := models.LookupSetting(string(key))
+	if !ok {
+		return 0, fmt.Errorf("unknown setting '%s'", key)
+	}
+	var value int
+	err := s.db.QueryRow(`SELECT value FROM settings WHERE key = ?`, string(key)).Scan(&value)
+	if err == sql.ErrNoRows {
+		return def.Default, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("failed to query setting '%s': %w", key, err)
+	}
+	return value, nil
+}
+
+func (s *Store) SetSetting(key models.SettingKey, value int) error {
+	_, err := s.db.Exec(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, string(key), value)
+	return err
 }
 
 func (s *Store) GetRegistryByRegex(pattern string) ([]models.RemoteRegistry, error) {

@@ -19,6 +19,8 @@ type CLI struct {
 	ConfigMounts map[string]ConfigMount
 	PortMappings map[string]string
 	ExtraRunArgs []ExtraRunArg
+	// Alias opts this CLI into an un-prefixed alias when alias_mode is "some".
+	Alias bool
 }
 
 type RemotePackage struct {

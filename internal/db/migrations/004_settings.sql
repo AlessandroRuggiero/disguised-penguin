@@ -1,0 +1,8 @@
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value INTEGER NOT NULL
+);
+
+INSERT OR IGNORE INTO settings (key, value) VALUES ('alias_mode', 0);
+
+ALTER TABLE clis ADD COLUMN alias INTEGER NOT NULL DEFAULT 0;

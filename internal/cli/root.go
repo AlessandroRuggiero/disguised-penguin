@@ -315,6 +315,7 @@ var rootCmd = &cobra.Command{
 }
 
 func Execute() error {
+	hookCompletionCmd(os.Args[1:])
 	return rootCmd.Execute()
 }
 
@@ -356,4 +357,14 @@ func init() {
 	workspaceProtectionCmd.AddCommand(workspaceProtectionAddCmd)
 	workspaceProtectionCmd.AddCommand(workspaceProtectionRemoveCmd)
 	workspaceProtectionCmd.AddCommand(workspaceProtectionListCmd)
+
+	rootCmd.AddCommand(settingsCmd)
+	settingsCmd.AddCommand(settingsListCmd)
+	settingsCmd.AddCommand(settingsGetCmd)
+	settingsCmd.AddCommand(settingsSetCmd)
+
+	rootCmd.AddCommand(aliasCmd)
+	aliasCmd.AddCommand(aliasAddCmd)
+	aliasCmd.AddCommand(aliasRemoveCmd)
+	aliasCmd.AddCommand(aliasListCmd)
 }
