@@ -186,7 +186,9 @@ var rootCmd = &cobra.Command{
 		selinux := container.SELinuxEnabled()
 		mountSuffix := container.MountOpts("", selinux)
 
-		runtimeArgs := []string{"run", "--rm", "-it", "-v", fmt.Sprintf("%s:/workspace%s", cwd, mountSuffix), "-w", "/workspace"}
+		runtimeArgs := []string{"run", "--rm"}
+		runtimeArgs = append(runtimeArgs, container.InteractiveFlags(container.StdioIsTerminal())...)
+		runtimeArgs = append(runtimeArgs, "-v", fmt.Sprintf("%s:/workspace%s", cwd, mountSuffix), "-w", "/workspace")
 
 		// On Windows, os/user returns SID strings (not numeric IDs), and bind
 		// mounts of Windows paths have no real POSIX ownership to match anyway,

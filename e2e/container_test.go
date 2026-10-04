@@ -5,9 +5,10 @@
 // container runtime (docker/podman) and pulls a small image (busybox), so it is
 // gated behind the `integration` build tag and, in CI, runs only on Linux.
 //
-// `dp` hardcodes `docker run -it`, so it needs a terminal. We give it one by
-// launching it under a pseudo-terminal (creack/pty) — the only reason this file
-// depends on that package, and the only reason it is confined to this tag.
+// `dp` only passes `-t` to the runtime when it is attached to a terminal. We
+// give it one by launching it under a pseudo-terminal (creack/pty), so these
+// tests exercise the interactive path users normally hit — the only reason this
+// file depends on that package, and the only reason it is confined to this tag.
 //
 // Run with:  go test -tags=integration -timeout 300s ./e2e/...
 package e2e
