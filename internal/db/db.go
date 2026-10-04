@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -61,7 +62,8 @@ func NewStore() (*Store, error) {
 		return nil, fmt.Errorf("could not get DB path: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", dbPath+"?_pragma=foreign_keys(1)")
+	// busy_timeout: wait for another dp process's write instead of failing.
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open DB: %w", err)
 	}
@@ -425,4 +427,51 @@ func (s *Store) RemoveMountProtection(workspaceID int, mountPath string) (bool, 
 		return false, err
 	}
 	return rowsAffected > 0, nil
+}
+
+// Keeps last_used_at: a rebuild isn't a use.
+func (s *Store) RecordVariantBuild(cliName, projectDir, image string, at time.Time) error {
+	_, err := s.db.Exec(`INSERT INTO variants (cli_name, project_dir, image, built_at) VALUES (?, ?, ?, ?)
+		ON CONFLICT(cli_name, project_dir) DO UPDATE SET image = excluded.image, built_at = excluded.built_at`,
+		cliName, projectDir, image, at.Unix())
+	return err
+}
+
+// Also creates the row for variants built before tracking existed.
+func (s *Store) TouchVariant(cliName, projectDir, image string, at time.Time) error {
+	_, err := s.db.Exec(`INSERT INTO variants (cli_name, project_dir, image, built_at, last_used_at) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(cli_name, project_dir) DO UPDATE SET image = excluded.image, last_used_at = excluded.last_used_at`,
+		cliName, projectDir, image, at.Unix(), at.Unix())
+	return err
+}
+
+// An empty cliName lists all variants.
+func (s *Store) ListVariants(cliName string) ([]models.TrackedVariant, error) {
+	rows, err := s.db.Query(`SELECT id, cli_name, project_dir, image, built_at, last_used_at FROM variants
+		WHERE ? = '' OR cli_name = ? ORDER BY cli_name, project_dir`, cliName, cliName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query variants: %w", err)
+	}
+	defer rows.Close()
+
+	var variants []models.TrackedVariant
+	for rows.Next() {
+		var v models.TrackedVariant
+		var builtAt int64
+		var lastUsedAt sql.NullInt64
+		if err := rows.Scan(&v.ID, &v.CLIName, &v.ProjectDir, &v.Image, &builtAt, &lastUsedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan variant: %w", err)
+		}
+		v.BuiltAt = time.Unix(builtAt, 0)
+		if lastUsedAt.Valid {
+			v.LastUsedAt = time.Unix(lastUsedAt.Int64, 0)
+		}
+		variants = append(variants, v)
+	}
+	return variants, rows.Err()
+}
+
+func (s *Store) RemoveVariant(id int) error {
+	_, err := s.db.Exec(`DELETE FROM variants WHERE id = ?`, id)
+	return err
 }

@@ -160,6 +160,8 @@ dp update
 ```
 Updates every installed CLI. Failures for individual CLIs are reported but don't stop the rest from updating.
 
+Add `--variants` to also rebuild the [project variants](#project-variants) of the CLIs that updated, in every project that has one.
+
 If a package's [extra run args](#extra-run-args) changed since you accepted them, `dp` shows the old and new lists and asks again; declining leaves that CLI untouched. `--yes`/`-y` accepts the changes without prompting.
 
 ### Update `dp` itself
@@ -263,6 +265,37 @@ To apply a protection for a single run instead of persisting it, use the `--mp` 
 ```bash
 dp --mp .git:ro --mp .env:h <cli-name> [args...]
 ```
+### Project Variants
+
+A variant is a project-local flavour of an installed CLI: an image built from the CLI's image plus whatever your project needs on top. It is declared in `.dp/variants.json`, and whenever you run that CLI from the project, `dp` uses the variant instead.
+
+```bash
+# Declare a variant and scaffold its build file (.dp/build/<cli>.Dockerfile)
+dp local variant extend <cli>
+
+# Build this project's variants (all of them, or one)
+dp local variant build
+dp local variant build <cli>
+```
+
+`dp` keeps a record of every variant it builds or runs, across all your projects, so you can manage them from anywhere:
+
+```bash
+# Every tracked variant, with its project, when it was built and last used
+dp variants list
+
+# Update CLIs and rebuild their variants in every project
+dp update --variants
+dp update <cli> --variants
+
+# Remove variants not run in 30 days, plus those whose project folder is gone
+dp variants prune --older-than 30d
+```
+
+`--older-than` takes days (`30d`), weeks (`2w`) or any Go duration (`36h`). A variant that was never run counts from when it was built, and rebuilding doesn't count as using it. Prune lists what it will remove and asks first (`--yes` skips the question). It removes the image and the record but leaves `.dp/variants.json` alone, so `dp local variant build` brings a variant back.
+
+Variants built before this tracking existed show up in `dp variants list` after they're next built or run.
+
 ### Project Mounts With `.dp/mounts.json`
 
 A project can overlay its workspace for every CLI run from that directory by listing entries in `.dp/mounts.json`. `mounts` is a list of objects, each with a `path` (relative to the workspace root) and a `mode`:

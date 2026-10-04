@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
+	"time"
 
 	"disguised-penguin/internal/container"
 	"disguised-penguin/internal/db"
@@ -30,6 +31,9 @@ var (
 	installYesFlag bool
 	updateYesFlag  bool
 )
+
+// --variants on update: also rebuild the tracked variants of updated CLIs.
+var updateVariantsFlag bool
 
 func SetupBindings(dbStore *db.Store) {
 	store = dbStore
@@ -296,6 +300,11 @@ var rootCmd = &cobra.Command{
 			// If the CLI is a variant, use its variant image.
 			variantImageRef := variantImage(cli.Image, cwd)
 			runtimeArgs = append(runtimeArgs, variantImageRef)
+
+			// Docker/Podman don't track last use, so dp does (for prune).
+			if err := store.TouchVariant(cliName, projectKey(cwd), variantImageRef, time.Now()); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to record variant usage: %v\n", err)
+			}
 		} else {
 			// If the CLI is not a variant, use its image directly.
 			runtimeArgs = append(runtimeArgs, cli.Image)
@@ -324,6 +333,7 @@ func init() {
 
 	installCmd.Flags().BoolVarP(&installYesFlag, "yes", "y", false, "Accept the package's extra run args without prompting")
 	updateCmd.Flags().BoolVarP(&updateYesFlag, "yes", "y", false, "Accept changes to the package's extra run args without prompting")
+	updateCmd.Flags().BoolVar(&updateVariantsFlag, "variants", false, "Also rebuild the variants of the updated CLIs, in every project")
 
 	rootCmd.AddCommand(installCompletionsCmd)
 	rootCmd.AddCommand(addCmd)
@@ -346,6 +356,13 @@ func init() {
 	localCmd.AddCommand(localVariantCmd)
 	localVariantCmd.AddCommand(localVariantBuildCmd)
 	localVariantCmd.AddCommand(localVariantExtendCmd)
+
+	rootCmd.AddCommand(variantsCmd)
+	variantsCmd.AddCommand(variantsListCmd)
+	variantsCmd.AddCommand(variantsPruneCmd)
+	variantsPruneCmd.Flags().StringVar(&pruneOlderThanFlag, "older-than", "", "Remove variants not run within this age, e.g. 30d, 2w or 36h (required)")
+	variantsPruneCmd.Flags().BoolVarP(&pruneYesFlag, "yes", "y", false, "Remove without asking")
+	variantsPruneCmd.MarkFlagRequired("older-than")
 
 	rootCmd.AddCommand(workspaceCmd)
 	workspaceCmd.AddCommand(workspaceAddCmd)

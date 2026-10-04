@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func withGOOS(t *testing.T, value string) func() {
@@ -291,5 +292,77 @@ func TestSetCLIAlias(t *testing.T) {
 	}
 	if n, err := store.SetCLIAlias("missing", true); err != nil || n != 0 {
 		t.Errorf("SetCLIAlias(missing): %d, %v", n, err)
+	}
+}
+
+func TestVariantTracking(t *testing.T) {
+	store := newTestStore(t)
+	t0 := time.Unix(1_700_000_000, 0)
+
+	if err := store.RecordVariantBuild("tool", "/proj/a", "img:variant-a", t0); err != nil {
+		t.Fatalf("RecordVariantBuild: %v", err)
+	}
+	// A run before tracking existed creates the row on first use.
+	if err := store.TouchVariant("tool", "/proj/b", "img:variant-b", t0.Add(time.Hour)); err != nil {
+		t.Fatalf("TouchVariant (new): %v", err)
+	}
+	if err := store.TouchVariant("tool", "/proj/a", "img:variant-a", t0.Add(2*time.Hour)); err != nil {
+		t.Fatalf("TouchVariant: %v", err)
+	}
+	// Rebuilding moves built_at but must keep the last run.
+	if err := store.RecordVariantBuild("tool", "/proj/a", "img:variant-a", t0.Add(3*time.Hour)); err != nil {
+		t.Fatalf("RecordVariantBuild (rebuild): %v", err)
+	}
+	// The CLI's image was renamed, so the next run uses a new tag.
+	if err := store.TouchVariant("tool", "/proj/b", "img2:variant-b", t0.Add(time.Hour)); err != nil {
+		t.Fatalf("TouchVariant (renamed): %v", err)
+	}
+	if err := store.RecordVariantBuild("other", "/proj/a", "other:variant-a", t0); err != nil {
+		t.Fatalf("RecordVariantBuild (other): %v", err)
+	}
+
+	variants, err := store.ListVariants("tool")
+	if err != nil {
+		t.Fatalf("ListVariants: %v", err)
+	}
+	if len(variants) != 2 {
+		t.Fatalf("expected 2 variants of tool, got %+v", variants)
+	}
+	a, b := variants[0], variants[1]
+	if a.ProjectDir != "/proj/a" || !a.BuiltAt.Equal(t0.Add(3*time.Hour)) || !a.LastUsedAt.Equal(t0.Add(2*time.Hour)) {
+		t.Errorf("variant a: got %+v", a)
+	}
+	if b.ProjectDir != "/proj/b" || b.Image != "img2:variant-b" || !b.BuiltAt.Equal(t0.Add(time.Hour)) || !b.LastUsedAt.Equal(t0.Add(time.Hour)) {
+		t.Errorf("variant b: got %+v", b)
+	}
+
+	all, err := store.ListVariants("")
+	if err != nil || len(all) != 3 {
+		t.Fatalf("ListVariants(all): %d, %v", len(all), err)
+	}
+
+	if err := store.RemoveVariant(a.ID); err != nil {
+		t.Fatalf("RemoveVariant: %v", err)
+	}
+	if variants, _ := store.ListVariants("tool"); len(variants) != 1 || variants[0].ProjectDir != "/proj/b" {
+		t.Errorf("after remove: got %+v", variants)
+	}
+}
+
+func TestNeverRunVariantHasNoLastUse(t *testing.T) {
+	store := newTestStore(t)
+	t0 := time.Unix(1_700_000_000, 0)
+	if err := store.RecordVariantBuild("tool", "/proj", "img:v", t0); err != nil {
+		t.Fatalf("RecordVariantBuild: %v", err)
+	}
+	variants, err := store.ListVariants("")
+	if err != nil || len(variants) != 1 {
+		t.Fatalf("ListVariants: %v %v", variants, err)
+	}
+	if !variants[0].LastUsedAt.IsZero() {
+		t.Errorf("expected no last use, got %v", variants[0].LastUsedAt)
+	}
+	if !variants[0].LastActivity().Equal(t0) {
+		t.Errorf("LastActivity should fall back to the build time, got %v", variants[0].LastActivity())
 	}
 }

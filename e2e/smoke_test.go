@@ -484,3 +484,27 @@ func TestAliasesInCompletion(t *testing.T) {
 	out, code = run(t, data, "alias", "add", "missing")
 	mustFail(t, "not installed", out, code)
 }
+
+func TestVariantsListAndPruneWithoutRuntime(t *testing.T) {
+	data := t.TempDir()
+
+	// dp variants list
+	out, code := run(t, data, "variants", "list")
+	mustOK(t, "No tracked variants", out, code)
+
+	// dp variants prune (cutoff is required)
+	out, code = run(t, data, "variants", "prune")
+	mustFail(t, "older-than", out, code)
+
+	// dp variants prune --older-than soon
+	out, code = run(t, data, "variants", "prune", "--older-than", "soon")
+	mustFail(t, "invalid age", out, code)
+
+	// dp variants prune --older-than 30d (nothing tracked)
+	out, code = run(t, data, "variants", "prune", "--older-than", "30d")
+	mustOK(t, "Nothing to prune.", out, code)
+
+	// dp update --help lists the new flag
+	out, code = run(t, data, "update", "--help")
+	mustOK(t, "--variants", out, code)
+}

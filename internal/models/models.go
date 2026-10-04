@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 type RegistryType string
@@ -167,6 +168,23 @@ type FileVariant struct {
 
 type VariantConfigFile struct {
 	Variants map[string]FileVariant `json:"variants"`
+}
+
+type TrackedVariant struct {
+	ID         int
+	CLIName    string
+	ProjectDir string
+	Image      string
+	BuiltAt    time.Time
+	LastUsedAt time.Time // zero if it has never been run
+}
+
+// LastActivity is what prune measures age by.
+func (v TrackedVariant) LastActivity() time.Time {
+	if v.LastUsedAt.IsZero() {
+		return v.BuiltAt
+	}
+	return v.LastUsedAt
 }
 
 func MakeRegistryType(s string) (RegistryType, error) {

@@ -15,6 +15,8 @@ package e2e
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"os"
 	"os/exec"
@@ -168,5 +170,89 @@ func TestContainer_MountProtectionHide(t *testing.T) {
 	}
 	if !strings.Contains(out, "HIDDEN") {
 		t.Fatalf("expected hidden path to make the file absent; got:\n%s", out)
+	}
+}
+
+// runtimeName mirrors dp's auto-detection: docker if present, else podman.
+func runtimeName() string {
+	if _, err := exec.LookPath("docker"); err == nil {
+		return "docker"
+	}
+	return "podman"
+}
+
+// variantRef recomputes the tag dp gives a variant of busybox built in dir.
+func variantRef(dir string) string {
+	sum := sha256.Sum256([]byte(filepath.Clean(dir)))
+	return "busybox:variant-" + hex.EncodeToString(sum[:])[:32]
+}
+
+func TestContainer_VariantTrackedAndPruned(t *testing.T) {
+	requireRuntime(t)
+	data := t.TempDir()
+	dir := t.TempDir()
+	addBusybox(t, data)
+
+	// Declare a variant of busy by hand rather than with 'extend', so the test
+	// doesn't depend on base OS detection.
+	if err := os.MkdirAll(filepath.Join(dir, ".dp", "build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".dp", "variants.json"), []byte(`{"variants": {"busy": {"build_file": ".dp/build/busy.Dockerfile"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".dp", "build", "busy.Dockerfile"), []byte("FROM "+testImage+"\nRUN echo VARIANT_OK > /variant.txt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// dp local variant build busy
+	out, err := runPTY(t, dir, data, "local", "variant", "build", "busy")
+	if err != nil {
+		t.Fatalf("variant build failed: %v\noutput:\n%s", err, out)
+	}
+	ref := variantRef(dir)
+	t.Cleanup(func() { exec.Command(runtimeName(), "rmi", ref).Run() })
+
+	// dp variants list: recorded by the build, never run yet
+	out, code := run(t, data, "variants", "list")
+	mustOK(t, dir, out, code)
+	mustOK(t, "never", out, code)
+
+	// dp busy cat /variant.txt: runs the variant and records the use
+	out, err = runPTY(t, dir, data, "busy", "cat", "/variant.txt")
+	if err != nil || !strings.Contains(out, "VARIANT_OK") {
+		t.Fatalf("variant run failed: %v\noutput:\n%s", err, out)
+	}
+	out, code = run(t, data, "variants", "list")
+	mustOK(t, "just now", out, code)
+
+	// Rebuilding with a changed build file removes the image it replaces.
+	oldID, _ := exec.Command(runtimeName(), "images", "-q", "--no-trunc", ref).Output()
+	if err := os.WriteFile(filepath.Join(dir, ".dp", "build", "busy.Dockerfile"), []byte("FROM "+testImage+"\nRUN echo VARIANT_V2 > /variant.txt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err = runPTY(t, dir, data, "local", "variant", "build", "busy")
+	if err != nil {
+		t.Fatalf("variant rebuild failed: %v\noutput:\n%s", err, out)
+	}
+	if exec.Command(runtimeName(), "image", "inspect", string(bytes.TrimSpace(oldID))).Run() == nil {
+		t.Fatalf("old variant image %s still exists after rebuild", bytes.TrimSpace(oldID))
+	}
+
+	// A recent, existing variant is kept.
+	out, code = run(t, data, "variants", "prune", "--older-than", "30d", "--yes")
+	mustOK(t, "Nothing to prune.", out, code)
+
+	// Once its project is gone it is pruned whatever its age: image and record.
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	out, code = run(t, data, "variants", "prune", "--older-than", "1000d", "--yes")
+	mustOK(t, "Removed variant of 'busy'", out, code)
+
+	out, code = run(t, data, "variants", "list")
+	mustOK(t, "No tracked variants", out, code)
+	if img, _ := exec.Command(runtimeName(), "images", "-q", ref).Output(); len(bytes.TrimSpace(img)) != 0 {
+		t.Fatalf("variant image %s still exists after prune", ref)
 	}
 }

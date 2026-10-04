@@ -448,7 +448,13 @@ var updateCmd = &cobra.Command{
 		}
 
 		if len(args) == 1 {
-			return updateOne(args[0], runtime, updateYesFlag)
+			if err := updateOne(args[0], runtime, updateYesFlag); err != nil {
+				return err
+			}
+			if updateVariantsFlag {
+				return rebuildVariants(runtime, []string{args[0]})
+			}
+			return nil
 		}
 
 		clis, err := store.ListCLIs()
@@ -460,22 +466,29 @@ var updateCmd = &cobra.Command{
 			return nil
 		}
 
-		var failed []string
+		var failed, updated []string
 		for i, c := range clis {
 			fmt.Printf("[%d/%d] Updating '%s'...\n", i+1, len(clis), c.Name)
 			if err := updateOne(c.Name, runtime, updateYesFlag); err != nil {
 				fmt.Fprintf(os.Stderr, "Failed to update '%s': %v\n", c.Name, err)
 				failed = append(failed, c.Name)
+			} else {
+				updated = append(updated, c.Name)
 			}
 			fmt.Println()
 		}
 
-		succeeded := len(clis) - len(failed)
-		fmt.Printf("Updated %d/%d CLIs.\n", succeeded, len(clis))
+		fmt.Printf("Updated %d/%d CLIs.\n", len(updated), len(clis))
+
+		var variantsErr error
+		if updateVariantsFlag {
+			variantsErr = rebuildVariants(runtime, updated)
+		}
+
 		if len(failed) > 0 {
 			return fmt.Errorf("failed to update: %s", strings.Join(failed, ", "))
 		}
-		return nil
+		return variantsErr
 	},
 }
 

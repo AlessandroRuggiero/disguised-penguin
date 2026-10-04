@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"disguised-penguin/internal/container"
 	"disguised-penguin/internal/models"
@@ -82,15 +83,19 @@ const variantTagPrefix = "variant-"
 // The runtime's limit is 128 characters.
 const variantTagLen = 32
 
-// variantImage is the CLI's image retagged with a digest of the project dir,
-// so two projects never share a built image.
-func variantImage(baseImage string, projectDir string) string {
-	// Absolute and cleaned, so "." and the full path hash the same.
+// projectKey is what the variant tag hashes and the variants table stores.
+func projectKey(projectDir string) string {
 	abs, err := filepath.Abs(projectDir)
 	if err != nil {
 		abs = projectDir
 	}
-	sum := sha256.Sum256([]byte(filepath.Clean(abs)))
+	return filepath.Clean(abs)
+}
+
+// variantImage is the CLI's image retagged with a digest of the project dir,
+// so two projects never share a built image.
+func variantImage(baseImage string, projectDir string) string {
+	sum := sha256.Sum256([]byte(projectKey(projectDir)))
 	return fmt.Sprintf("%s:%s%s", imageRepository(baseImage), variantTagPrefix, hex.EncodeToString(sum[:])[:variantTagLen])
 }
 
@@ -111,17 +116,26 @@ func imageRepository(image string) string {
 
 // isVariantBuilt reports whether this project's variant image exists locally.
 func isVariantBuilt(runtime container.Runtime, baseImage string, projectDir string) (bool, error) {
+	return imageExists(runtime, variantImage(baseImage, projectDir))
+}
+
+func imageExists(runtime container.Runtime, ref string) (bool, error) {
+	id, err := imageID(runtime, ref)
+	return id != "", err
+}
+
+// imageID returns the ref's image ID, or "" if it doesn't exist locally.
+func imageID(runtime container.Runtime, ref string) (string, error) {
 	// "images -q" prints an ID or nothing, both with exit 0, so a real
 	// failure stays distinguishable from a missing image.
-	ref := variantImage(baseImage, projectDir)
-	cmd := exec.Command(string(runtime), "images", "-q", ref)
+	cmd := exec.Command(string(runtime), "images", "-q", "--no-trunc", ref)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return false, fmt.Errorf("failed to check for image '%s' with %s: %w: %s", ref, runtime, err, strings.TrimSpace(stderr.String()))
+		return "", fmt.Errorf("failed to check for image '%s' with %s: %w: %s", ref, runtime, err, strings.TrimSpace(stderr.String()))
 	}
-	return len(bytes.TrimSpace(out)) > 0, nil
+	return string(bytes.TrimSpace(out)), nil
 }
 
 const dpReadmeFile = ".dp/README.md"
@@ -317,6 +331,7 @@ func buildVariant(runtime container.Runtime, variant models.Variant, projectDir 
 	}
 
 	ref := variantImage(cli.Image, projectDir)
+	oldID, _ := imageID(runtime, ref)
 	fmt.Printf("Building '%s' from %s...\n", ref, variant.BuildFile)
 
 	// --pull so an updated base in the registry is picked up. Without it the
@@ -329,6 +344,16 @@ func buildVariant(runtime container.Runtime, variant models.Variant, projectDir 
 	}
 
 	fmt.Printf("Successfully built '%s'\n", ref)
+
+	// The rebuild moved the tag, leaving the old image untagged. Remove it;
+	// if it's still in use, rmi refuses and it simply stays.
+	if newID, _ := imageID(runtime, ref); oldID != "" && newID != "" && newID != oldID {
+		exec.Command(string(runtime), "rmi", oldID).Run()
+	}
+
+	if err := store.RecordVariantBuild(variant.Of, projectKey(projectDir), ref, time.Now()); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to record the variant build: %v\n", err)
+	}
 	return nil
 }
 
