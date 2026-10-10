@@ -187,6 +187,60 @@ func variantRef(dir string) string {
 	return "busybox:variant-" + hex.EncodeToString(sum[:])[:32]
 }
 
+func TestContainer_VariantDestroy(t *testing.T) {
+	requireRuntime(t)
+	data := t.TempDir()
+	dir := t.TempDir()
+	addBusybox(t, data)
+
+	if err := os.MkdirAll(filepath.Join(dir, ".dp", "build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".dp", "variants.json"), []byte(`{"variants": {"busy": {"build_file": ".dp/build/busy.Dockerfile"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".dp", "build", "busy.Dockerfile"), []byte("FROM "+testImage+"\nRUN echo VARIANT_OK > /variant.txt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ref := variantRef(dir)
+	t.Cleanup(func() { exec.Command(runtimeName(), "rmi", ref).Run() })
+
+	// Once with the CLI named, once for the whole project.
+	for _, args := range [][]string{{"local", "variant", "destroy", "busy"}, {"local", "variant", "destroy"}} {
+		out, err := runPTY(t, dir, data, "local", "variant", "build", "busy")
+		if err != nil {
+			t.Fatalf("variant build failed: %v\noutput:\n%s", err, out)
+		}
+
+		out, err = runPTY(t, dir, data, args...)
+		if err != nil || !strings.Contains(out, "Removed variant of 'busy'") {
+			t.Fatalf("dp %s failed: %v\noutput:\n%s", strings.Join(args, " "), err, out)
+		}
+		if img, _ := exec.Command(runtimeName(), "images", "-q", ref).Output(); len(bytes.TrimSpace(img)) != 0 {
+			t.Fatalf("variant image %s still exists after destroy", ref)
+		}
+		out, code := run(t, data, "variants", "list")
+		mustOK(t, "No tracked variants", out, code)
+	}
+
+	// The declaration survives, so the CLI asks for a rebuild instead of
+	// falling back to the base image.
+	out, err := runPTY(t, dir, data, "busy", "true")
+	if err == nil || !strings.Contains(out, "has not been built yet") {
+		t.Fatalf("expected a not-built error after destroy; got %v\noutput:\n%s", err, out)
+	}
+
+	// Nothing left: naming a CLI fails, the bare form is a no-op.
+	out, err = runPTY(t, dir, data, "local", "variant", "destroy", "busy")
+	if err == nil || !strings.Contains(out, "no variant of 'busy' is built") {
+		t.Fatalf("expected destroy of a missing variant to fail; got %v\noutput:\n%s", err, out)
+	}
+	out, err = runPTY(t, dir, data, "local", "variant", "destroy")
+	if err != nil || !strings.Contains(out, "No variants built for this project.") {
+		t.Fatalf("bare destroy with nothing built failed: %v\noutput:\n%s", err, out)
+	}
+}
+
 func TestContainer_VariantTrackedAndPruned(t *testing.T) {
 	requireRuntime(t)
 	data := t.TempDir()

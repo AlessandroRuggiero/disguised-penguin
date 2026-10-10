@@ -356,6 +356,7 @@ func init() {
 	localCmd.AddCommand(localVariantCmd)
 	localVariantCmd.AddCommand(localVariantBuildCmd)
 	localVariantCmd.AddCommand(localVariantExtendCmd)
+	localVariantCmd.AddCommand(localVariantDestroyCmd)
 
 	rootCmd.AddCommand(variantsCmd)
 	variantsCmd.AddCommand(variantsListCmd)

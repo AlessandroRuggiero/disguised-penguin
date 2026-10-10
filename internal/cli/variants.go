@@ -223,8 +223,11 @@ func describeOSRelease(content string) string {
 	return name
 }
 
-// variantNames lists the CLIs this project declares a variant for.
-func variantNames() ([]string, cobra.ShellCompDirective) {
+// completeVariantNames completes the CLIs this project declares a variant for.
+func completeVariantNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) != 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveError
@@ -261,13 +264,8 @@ var localVariantBuildCmd = &cobra.Command{
 	Long:    "Build the variant images declared in ./.dp/variants.json.\nWith no argument every variant in the file is built.",
 	Example: `  dp local variant build
   dp local variant build claude`,
-	Args: cobra.MaximumNArgs(1),
-	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-		if len(args) != 0 {
-			return nil, cobra.ShellCompDirectiveNoFileComp
-		}
-		return variantNames()
-	},
+	Args:              cobra.MaximumNArgs(1),
+	ValidArgsFunction: completeVariantNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -355,6 +353,106 @@ func buildVariant(runtime container.Runtime, variant models.Variant, projectDir 
 		fmt.Fprintf(os.Stderr, "Warning: failed to record the variant build: %v\n", err)
 	}
 	return nil
+}
+
+// projectVariants returns the variants built for projectDir: the tracked
+// ones, plus the declared ones whose image predates tracking.
+func projectVariants(runtime container.Runtime, projectDir string) ([]models.TrackedVariant, error) {
+	tracked, err := store.ListVariants("")
+	if err != nil {
+		return nil, err
+	}
+	project := projectKey(projectDir)
+	var variants []models.TrackedVariant
+	seen := map[string]bool{}
+	for _, v := range tracked {
+		if v.ProjectDir == project {
+			variants = append(variants, v)
+			seen[v.CLIName] = true
+		}
+	}
+
+	declared, err := loadVariants(projectDir)
+	if err != nil {
+		return nil, err
+	}
+	for of := range declared {
+		cli, err := store.GetCliByName(of)
+		if seen[of] || err != nil {
+			continue
+		}
+		ref := variantImage(cli.Image, projectDir)
+		built, err := imageExists(runtime, ref)
+		if err != nil {
+			return nil, err
+		}
+		if built {
+			variants = append(variants, models.TrackedVariant{CLIName: of, ProjectDir: project, Image: ref})
+		}
+	}
+	sort.Slice(variants, func(i, j int) bool { return variants[i].CLIName < variants[j].CLIName })
+	return variants, nil
+}
+
+var localVariantDestroyCmd = &cobra.Command{
+	Use:     "destroy [cli]",
+	Aliases: []string{"d"},
+	Short:   "Remove this project's variant images",
+	Long: `Remove this project's variant images, to get their disk space back.
+With no argument every variant of this project is removed.
+
+Each variant's image and dp's record of it are removed. ./.dp/variants.json
+and the build files are left alone, so 'dp local variant build' brings it back.`,
+	Example: `  dp local variant destroy
+  dp local variant destroy claude`,
+	Args:              cobra.MaximumNArgs(1),
+	ValidArgsFunction: completeVariantNames,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("failed to get current directory: %w", err)
+		}
+		runtime, err := container.ResolveRuntime(containerRuntimeFlag)
+		if err != nil {
+			return err
+		}
+		variants, err := projectVariants(runtime, cwd)
+		if err != nil {
+			return err
+		}
+
+		// CLIs sharing an image share the variant tag; keep it if still used.
+		var targets []models.TrackedVariant
+		kept := map[string]bool{}
+		for _, v := range variants {
+			if len(args) == 0 || v.CLIName == args[0] {
+				targets = append(targets, v)
+			} else {
+				kept[v.Image] = true
+			}
+		}
+		if len(targets) == 0 {
+			if len(args) == 1 {
+				return fmt.Errorf("no variant of '%s' is built for this project", args[0])
+			}
+			fmt.Println("No variants built for this project.")
+			return nil
+		}
+
+		var failed []string
+		for _, v := range targets {
+			if err := removeVariant(runtime, v, kept[v.Image]); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to remove variant of '%s': %v\n", v.CLIName, err)
+				failed = append(failed, v.CLIName)
+				continue
+			}
+			fmt.Printf("Removed variant of '%s' (%s)\n", v.CLIName, v.Image)
+		}
+		if len(failed) > 0 {
+			return fmt.Errorf("failed to destroy: %s", strings.Join(failed, ", "))
+		}
+		return nil
+	},
 }
 
 var localVariantExtendCmd = &cobra.Command{

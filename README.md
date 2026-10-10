@@ -276,7 +276,13 @@ dp local variant extend <cli>
 # Build this project's variants (all of them, or one)
 dp local variant build
 dp local variant build <cli>
+
+# Remove this project's variant images to get the space back (all of them, or one)
+dp local variant destroy
+dp local variant destroy <cli>
 ```
+
+`destroy` removes the image and dp's record of it but leaves `.dp/variants.json` and the build files alone, so `dp local variant build` brings a variant back.
 
 `dp` keeps a record of every variant it builds or runs, across all your projects, so you can manage them from anywhere:
 
