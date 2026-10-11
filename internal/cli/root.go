@@ -86,6 +86,7 @@ var rootCmd = &cobra.Command{
 		workspaceName := "default"
 		runtimeRequested := containerRuntimeFlag
 		var mpSpecs []string
+		monitor := false
 
 		for len(cliArgs) > 0 {
 			if cliArgs[0] == "-w" || cliArgs[0] == "--workspace" {
@@ -114,6 +115,9 @@ var rootCmd = &cobra.Command{
 				}
 			} else if strings.HasPrefix(cliArgs[0], "--runtime=") {
 				runtimeRequested = strings.TrimPrefix(cliArgs[0], "--runtime=")
+				cliArgs = cliArgs[1:]
+			} else if cliArgs[0] == "--monitor" {
+				monitor = true
 				cliArgs = cliArgs[1:]
 			} else if cliArgs[0] == "-v" || cliArgs[0] == "--version" {
 				// DisableFlagParsing means cobra won't handle these itself; do it
@@ -216,6 +220,15 @@ var rootCmd = &cobra.Command{
 			if runtime == container.RuntimePodman && os.Geteuid() != 0 {
 				runtimeArgs = append(runtimeArgs, "--userns=keep-id", "--user=0")
 			}
+		}
+
+		// --monitor groups the container as an app for desktop system monitors.
+		// That relies on the user's systemd session, so rootless podman on Linux only.
+		if monitor {
+			if goruntime.GOOS != "linux" || runtime != container.RuntimePodman || os.Geteuid() == 0 {
+				return fmt.Errorf("--monitor is only supported with rootless podman on Linux")
+			}
+			runtimeArgs = append(runtimeArgs, container.AppCgroupFlags(cli.Name)...)
 		}
 
 		ws, err := workspace.Get(workspaceName)

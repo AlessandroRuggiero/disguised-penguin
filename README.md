@@ -265,6 +265,16 @@ To apply a protection for a single run instead of persisting it, use the `--mp` 
 ```bash
 dp --mp .git:ro --mp .env:h <cli-name> [args...]
 ```
+
+### Show a CLI in the System Monitor
+
+Use the `--monitor` flag *before* the CLI name to have the container show up as its own application in desktop system monitors (tested with KDE System Monitor), so you can follow its CPU and memory usage:
+
+```bash
+dp --monitor <cli-name> [args...]
+```
+
+The entry is named `dp.<cli-name>`. This only works with rootless Podman on Linux; with any other setup `dp` exits with an error.
 ### Project Variants
 
 A variant is a project-local flavour of an installed CLI: an image built from the CLI's image plus whatever your project needs on top. It is declared in `.dp/variants.json`, and whenever you run that CLI from the project, `dp` uses the variant instead.
