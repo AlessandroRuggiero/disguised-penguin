@@ -13,8 +13,9 @@ import (
 type SettingKey string
 
 const (
-	SettingAliasMode SettingKey = "alias_mode"
-	SettingWtCommit  SettingKey = "wt_commit"
+	SettingAliasMode     SettingKey = "alias_mode"
+	SettingWtCommit      SettingKey = "wt_commit"
+	SettingUpdateChannel SettingKey = "update_channel"
 )
 
 type AliasMode int
@@ -31,6 +32,13 @@ const (
 	WtDiscard WtCommit = 0
 	WtAsk     WtCommit = 1
 	WtFlag    WtCommit = 2
+)
+
+type UpdateChannel int
+
+const (
+	ChannelStable     UpdateChannel = 0
+	ChannelPrerelease UpdateChannel = 1
 )
 
 type SettingValue struct {
@@ -65,6 +73,15 @@ var settingDefs = []SettingDef{
 			{int(WtDiscard), "discard", "always throw them away"},
 			{int(WtAsk), "ask", "list them and ask whether to commit (discarded with no terminal)"},
 			{int(WtFlag), "flag", "commit only when the run was started with --commit"},
+		},
+	},
+	{
+		Key:         SettingUpdateChannel,
+		Description: "Which releases 'dp self-update' installs",
+		Default:     int(ChannelStable),
+		Values: []SettingValue{
+			{int(ChannelStable), "stable", "only stable releases"},
+			{int(ChannelPrerelease), "prerelease", "the newest release, pre-releases included"},
 		},
 	},
 }

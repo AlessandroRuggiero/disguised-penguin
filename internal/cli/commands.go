@@ -496,29 +496,19 @@ var selfUpdateCmd = &cobra.Command{
 	Use:   "self-update",
 	Short: "Update the disguised-penguin CLI to the latest version",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Fetch the latest release info from GitHub API
-		apiURL := "https://api.github.com/repos/AlessandroRuggiero/disguised-penguin/releases/latest"
-		respAPI, err := http.Get(apiURL)
+		channel, err := store.GetSetting(models.SettingUpdateChannel)
 		if err != nil {
-			return fmt.Errorf("failed to fetch latest release info: %w", err)
+			return err
 		}
-		defer respAPI.Body.Close()
-
-		if respAPI.StatusCode != http.StatusOK {
-			return fmt.Errorf("failed to fetch latest release info: HTTP %d", respAPI.StatusCode)
-		}
-
-		var release struct {
-			TagName string `json:"tag_name"`
-		}
-		if err := json.NewDecoder(respAPI.Body).Decode(&release); err != nil {
-			return fmt.Errorf("failed to parse release info: %w", err)
+		tag, err := latestReleaseTag(models.UpdateChannel(channel))
+		if err != nil {
+			return err
 		}
 
 		fmt.Printf("Current version: %s\n", Version)
-		fmt.Printf("Latest version:  %s\n", release.TagName)
+		fmt.Printf("Latest version:  %s\n", tag)
 
-		if Version == release.TagName {
+		if Version == tag {
 			fmt.Println("You are already on the latest version!")
 			return nil
 		}
@@ -529,7 +519,7 @@ var selfUpdateCmd = &cobra.Command{
 		if runtime.GOOS == "windows" {
 			assetName += ".exe"
 		}
-		url := fmt.Sprintf("https://github.com/AlessandroRuggiero/disguised-penguin/releases/latest/download/%s", assetName)
+		url := fmt.Sprintf("https://github.com/AlessandroRuggiero/disguised-penguin/releases/download/%s/%s", tag, assetName)
 		resp, err := http.Get(url)
 		if err != nil {
 			return fmt.Errorf("failed to download latest version: %w", err)
@@ -588,9 +578,51 @@ var selfUpdateCmd = &cobra.Command{
 			}
 		}
 
-		fmt.Printf("Successfully updated 'dp' to %s.\n", release.TagName)
+		fmt.Printf("Successfully updated 'dp' to %s.\n", tag)
 		return nil
 	},
+}
+
+// latestReleaseTag asks the GitHub API for the newest release tag on the given channel.
+// /releases/latest never returns a pre-release, so the prerelease channel takes the
+// newest entry of the full release list instead.
+func latestReleaseTag(channel models.UpdateChannel) (string, error) {
+	apiURL := "https://api.github.com/repos/AlessandroRuggiero/disguised-penguin/releases/latest"
+	if channel == models.ChannelPrerelease {
+		apiURL = "https://api.github.com/repos/AlessandroRuggiero/disguised-penguin/releases?per_page=10"
+	}
+	resp, err := http.Get(apiURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch latest release info: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to fetch latest release info: HTTP %d", resp.StatusCode)
+	}
+
+	type release struct {
+		TagName string `json:"tag_name"`
+		Draft   bool   `json:"draft"`
+	}
+	if channel != models.ChannelPrerelease {
+		var r release
+		if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+			return "", fmt.Errorf("failed to parse release info: %w", err)
+		}
+		return r.TagName, nil
+	}
+
+	var releases []release
+	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
+		return "", fmt.Errorf("failed to parse release info: %w", err)
+	}
+	for _, r := range releases {
+		if !r.Draft {
+			return r.TagName, nil
+		}
+	}
+	return "", fmt.Errorf("no published releases found")
 }
 
 var registryVisitCmd = &cobra.Command{

@@ -46,7 +46,7 @@ var settingsListCmd = &cobra.Command{
 			fmt.Printf("%s = %s (%d)\n", def.Key, def.ValueName(value), value)
 			fmt.Printf("    %s\n", def.Description)
 			for _, v := range def.Values {
-				fmt.Printf("    %d  %-7s %s\n", v.Value, v.Name, v.Description)
+				fmt.Printf("    %d  %-10s %s\n", v.Value, v.Name, v.Description)
 			}
 		}
 		return nil

@@ -169,7 +169,7 @@ If a package's [extra run args](#extra-run-args) changed since you accepted them
 ```bash
 dp self-update
 ```
-Downloads the latest `dp` binary from GitHub Releases and replaces the current executable.
+Downloads the latest `dp` binary from GitHub Releases and replaces the current executable. By default only stable releases are installed; to track pre-releases too, run `dp settings set update_channel prerelease`.
 
 ### List installed CLIs
 
@@ -387,6 +387,8 @@ dp settings set alias_mode all   # same as: dp settings set alias_mode 2
 | Setting      | Values                                   | Default |
 |--------------|------------------------------------------|---------|
 | `alias_mode` | `none` (0), `some` (1), `all` (2): see [Run CLIs without the `dp` prefix](#run-clis-without-the-dp-prefix) | `none` |
+| `wt_commit` | `discard` (0), `ask` (1), `flag` (2): see [Write-Trapped Paths](#write-trapped-paths-wt) | `ask` |
+| `update_channel` | `stable` (0), `prerelease` (1): which releases `dp self-update` installs | `stable` |
 
 ### Database Management
 

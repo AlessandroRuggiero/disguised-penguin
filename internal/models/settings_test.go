@@ -52,3 +52,18 @@ func TestWtCommitSetting(t *testing.T) {
 		}
 	}
 }
+
+func TestUpdateChannelSetting(t *testing.T) {
+	def, ok := LookupSetting(string(SettingUpdateChannel))
+	if !ok {
+		t.Fatalf("update_channel not registered")
+	}
+	if def.Default != int(ChannelStable) {
+		t.Errorf("default = %d, want stable", def.Default)
+	}
+	for in, want := range map[string]UpdateChannel{"stable": ChannelStable, "prerelease": ChannelPrerelease, "1": ChannelPrerelease} {
+		if got, err := def.Parse(in); err != nil || UpdateChannel(got) != want {
+			t.Errorf("Parse(%q) = %d, %v", in, got, err)
+		}
+	}
+}
