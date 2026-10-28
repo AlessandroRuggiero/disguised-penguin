@@ -9,7 +9,8 @@ import (
 )
 
 // MountProtection is a single parsed --mp PATH:MODE spec, where Rel is the
-// cleaned path relative to the workspace root and Mode is "ro", "rw", or "h".
+// cleaned path relative to the workspace root and Mode is "ro", "rw", "h", or
+// "wt" (write-trapped).
 type MountProtection struct {
 	Rel  string
 	Mode string
@@ -29,9 +30,9 @@ func ParseProtection(spec string) (MountProtection, error) {
 	rawPath, mode := spec[:idx], spec[idx+1:]
 
 	switch mode {
-	case "ro", "rw", "h":
+	case "ro", "rw", "h", "wt":
 	default:
-		return MountProtection{}, fmt.Errorf("invalid mount protection mode %q in %q (expected ro, rw, or h)", mode, spec)
+		return MountProtection{}, fmt.Errorf("invalid mount protection mode %q in %q (expected ro, rw, h, or wt)", mode, spec)
 	}
 
 	// Protection paths are Linux container paths, so clean/validate with forward-slash path semantics on every host OS.
@@ -63,6 +64,14 @@ func MountOpts(mode string, selinux bool) string {
 		return ""
 	}
 	return ":" + strings.Join(opts, ",")
+}
+
+// TrapMountArg builds the -v arg for a write-trapped ("wt") directory: a podman
+// overlay whose upper and work dirs dp supplies, so podman leaves the writes
+// there after the container exits. "O" accepts no other options, so there is
+// no SELinux relabel; the source sits under the already relabelled workspace.
+func TrapMountArg(host, dest, upper, work string) string {
+	return fmt.Sprintf("%s:%s:O,upperdir=%s,workdir=%s", host, dest, upper, work)
 }
 
 // HidePlaceholders provides the empty dir and file bind mounted over targets

@@ -62,15 +62,20 @@ Overlays paths in `/workspace` for every CLI run from this directory:
 }
 ```
 
-`mode` is `ro` (read-only), `rw` (read-write) or `h` (hidden). `source` is an
-optional folder under `.dp/` to show at `path`. It is then hidden at its
-original place, and it can't be combined with `h`.
+`mode` is `ro` (read-only), `rw` (read-write), `h` (hidden) or `wt`
+(write-trapped: writes are held back until the user commits them, rootless
+podman only). `source` is an optional folder under `.dp/` to show at `path`.
+It is then hidden at its original place, and it can't be combined with `h`.
 
 ## For AI agents
 
-- Inside a dp container, `/workspace/.dp` is mounted **read-only**, so a tool
-  cannot change the recipes that govern its own future runs. To change
-  anything here, propose the edit and let the user apply it on the host, then
-  rebuild with `dp local variant build <cli>`.
+- Inside a dp container, `/workspace/.dp` is **write-trapped** (with rootless
+  podman) or **read-only** (otherwise), so a tool cannot change the recipes
+  that govern its own future runs without the user's say. When it is
+  write-trapped you can edit files here: the user reviews the changes after
+  the run and decides whether to commit them. Either way, after a change the
+  variant needs `dp local variant build <cli>` to take effect.
+- Writes to a `wt` path work and read back normally inside the container, but
+  only reach the host if the user commits them after the run.
 - dp itself only reads the files above. Anything else here is used only if a
   build file `COPY`s it or `mounts.json` names it as a `source`.

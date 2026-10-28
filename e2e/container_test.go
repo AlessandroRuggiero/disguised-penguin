@@ -173,6 +173,145 @@ func TestContainer_MountProtectionHide(t *testing.T) {
 	}
 }
 
+// requireRootlessPodman skips unless wt mounts can run, and points dp at podman
+// even when docker is installed too.
+func requireRootlessPodman(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("podman"); err != nil || os.Geteuid() == 0 {
+		t.Skip("wt mounts need rootless podman")
+	}
+	t.Setenv("DP_CONTAINER_RUNTIME", "podman")
+}
+
+// trapFixture makes a workspace with trap/{keep,edit,drop}.txt, registers busy
+// in data, and sets wt_commit to flag so no run stops to ask.
+func trapFixture(t *testing.T) (dir, data string) {
+	t.Helper()
+	data = t.TempDir()
+	dir = t.TempDir()
+	for name, content := range map[string]string{"keep.txt": "keep", "edit.txt": "before", "drop.txt": "drop"} {
+		p := filepath.Join(dir, "trap", name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	addBusybox(t, data)
+	out, code := run(t, data, "settings", "set", "wt_commit", "flag")
+	mustOK(t, "", out, code)
+	return dir, data
+}
+
+// The writes a trapping run makes: add, edit and delete inside trap/, then
+// read them back, so the tool sees its own changes.
+const trapScript = "echo new > /workspace/trap/new.txt && echo after > /workspace/trap/edit.txt && " +
+	"rm /workspace/trap/drop.txt && mkdir /workspace/trap/sub && echo deep > /workspace/trap/sub/f && " +
+	"cat /workspace/trap/new.txt /workspace/trap/edit.txt && echo TOOL_SAW_WRITES"
+
+func readFile(t *testing.T, p string) string {
+	t.Helper()
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatalf("read %s: %v", p, err)
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func TestContainer_WriteTrapDiscards(t *testing.T) {
+	requireRuntime(t)
+	requireRootlessPodman(t)
+	dir, data := trapFixture(t)
+
+	// dp --mp trap:wt busy sh -c '<trapScript>'
+	out, err := runPTY(t, dir, data, "--mp", "trap:wt", "busy", "sh", "-c", trapScript)
+	if err != nil {
+		t.Fatalf("trapped run failed: %v\noutput:\n%s", err, out)
+	}
+	if !strings.Contains(out, "TOOL_SAW_WRITES") || !strings.Contains(out, "after") {
+		t.Fatalf("the tool should see its own writes; got:\n%s", out)
+	}
+	if !strings.Contains(out, "Discarded 5 trapped changes to trap") {
+		t.Fatalf("expected the writes to be discarded; got:\n%s", out)
+	}
+	if got := readFile(t, filepath.Join(dir, "trap", "edit.txt")); got != "before" {
+		t.Errorf("edit.txt changed on the host: %q", got)
+	}
+	for _, p := range []string{"new.txt", "sub"} {
+		if _, err := os.Lstat(filepath.Join(dir, "trap", p)); err == nil {
+			t.Errorf("%s reached the host", p)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "trap", "drop.txt")); err != nil {
+		t.Errorf("drop.txt was deleted on the host: %v", err)
+	}
+	assertNoLayersLeft(t, data)
+}
+
+func TestContainer_WriteTrapCommits(t *testing.T) {
+	requireRuntime(t)
+	requireRootlessPodman(t)
+	dir, data := trapFixture(t)
+
+	// dp --commit --mp trap:wt busy sh -c '<trapScript>'
+	out, err := runPTY(t, dir, data, "--commit", "--mp", "trap:wt", "busy", "sh", "-c", trapScript)
+	if err != nil {
+		t.Fatalf("trapped run failed: %v\noutput:\n%s", err, out)
+	}
+	for _, line := range []string{"A  new.txt", "M  edit.txt", "D  drop.txt", "A  sub/", "A  sub/f", "Committed 5 changes to trap"} {
+		if !strings.Contains(out, line) {
+			t.Errorf("output missing %q; got:\n%s", line, out)
+		}
+	}
+	if got := readFile(t, filepath.Join(dir, "trap", "edit.txt")); got != "after" {
+		t.Errorf("edit.txt = %q, want after", got)
+	}
+	if got := readFile(t, filepath.Join(dir, "trap", "new.txt")); got != "new" {
+		t.Errorf("new.txt = %q, want new", got)
+	}
+	if got := readFile(t, filepath.Join(dir, "trap", "sub", "f")); got != "deep" {
+		t.Errorf("sub/f = %q, want deep", got)
+	}
+	if got := readFile(t, filepath.Join(dir, "trap", "keep.txt")); got != "keep" {
+		t.Errorf("keep.txt = %q, want keep", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "trap", "drop.txt")); !os.IsNotExist(err) {
+		t.Errorf("drop.txt should be deleted on the host: %v", err)
+	}
+	assertNoLayersLeft(t, data)
+}
+
+func assertNoLayersLeft(t *testing.T, data string) {
+	t.Helper()
+	entries, _ := os.ReadDir(filepath.Join(data, "disguised-penguin", "overlays"))
+	if len(entries) != 0 {
+		t.Errorf("layers left behind: %v", entries)
+	}
+}
+
+func TestContainer_WriteTrapRejectsDocker(t *testing.T) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker not installed")
+	}
+	data := t.TempDir()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "trap"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	addBusybox(t, data)
+	t.Setenv("DP_CONTAINER_RUNTIME", "docker")
+
+	// dp --mp trap:wt busy true
+	cmd := exec.Command(dpBin, "--mp", "trap:wt", "busy", "true")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "XDG_DATA_HOME="+data)
+	out, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "need rootless podman") {
+		t.Fatalf("expected docker to be refused; err=%v output:\n%s", err, out)
+	}
+}
+
 // runtimeName mirrors dp's auto-detection: docker if present, else podman.
 func runtimeName() string {
 	if _, err := exec.LookPath("docker"); err == nil {

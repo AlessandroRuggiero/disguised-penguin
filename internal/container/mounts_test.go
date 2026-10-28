@@ -18,6 +18,7 @@ func TestParseProtection_Valid(t *testing.T) {
 		{"src/secret.txt:rw", "src/secret.txt", "rw"},
 		{"./config:ro", "config", "ro"},
 		{"a/b/../c:ro", "a/c", "ro"},
+		{"node_modules/:wt", "node_modules", "wt"},
 	}
 	for _, tc := range cases {
 		got, err := ParseProtection(tc.spec)
@@ -40,6 +41,7 @@ func TestParseProtection_Invalid(t *testing.T) {
 		"../secrets:ro",  // escapes workspace
 		"../../x:h",      // escapes workspace
 		".:ro",           // workspace root
+		".:wt",           // workspace root
 	}
 	for _, spec := range cases {
 		if _, err := ParseProtection(spec); err == nil {
@@ -64,6 +66,13 @@ func TestMountOpts(t *testing.T) {
 		if got := MountOpts(tc.mode, tc.selinux); got != tc.want {
 			t.Errorf("MountOpts(%q, %v) = %q, want %q", tc.mode, tc.selinux, got, tc.want)
 		}
+	}
+}
+
+func TestTrapMountArg(t *testing.T) {
+	got := TrapMountArg("/src/.git", "/workspace/.git", "/d/0/upper", "/d/0/work")
+	if want := "/src/.git:/workspace/.git:O,upperdir=/d/0/upper,workdir=/d/0/work"; got != want {
+		t.Errorf("TrapMountArg = %q, want %q", got, want)
 	}
 }
 

@@ -17,7 +17,7 @@ import (
 const localMountsFile = ".dp/mounts.json"
 
 // localMount is a parsed .dp/mounts.json entry. Source (optional, under .dp/)
-// is bound at Dest with Mode "ro", "rw", or "h".
+// is bound at Dest with Mode "ro", "rw", "h", or "wt".
 type localMount struct {
 	Source string
 	Dest   string
@@ -59,8 +59,8 @@ func loadLocalMounts(dir string) ([]localMount, error) {
 
 	mounts := make([]localMount, 0, len(config.Mounts))
 	for i, m := range config.Mounts {
-		if m.Mode != "ro" && m.Mode != "rw" && m.Mode != "h" {
-			return nil, fmt.Errorf("invalid local mount mode %q at index %d (expected \"ro\", \"rw\", or \"h\")", m.Mode, i)
+		if m.Mode != "ro" && m.Mode != "rw" && m.Mode != "h" && m.Mode != "wt" {
+			return nil, fmt.Errorf("invalid local mount mode %q at index %d (expected \"ro\", \"rw\", \"h\", or \"wt\")", m.Mode, i)
 		}
 		if m.Path == "" {
 			return nil, fmt.Errorf("local mount at index %d is missing \"path\"", i)
@@ -85,9 +85,24 @@ func loadLocalMounts(dir string) ([]localMount, error) {
 	return mounts, nil
 }
 
-// addPathOverlay overlays the workspace path rel with Mode "ro", "rw", or "h".
-// A missing host path is skipped; label names the entry in error messages.
-func addPathOverlay(overlays map[string]string, cwd string, selinux bool, hides *container.HidePlaceholders, rel, mode, label string) error {
+// overlay is one nested mount on /workspace: a finished -v arg, or for a wt
+// mount the directory whose layer is only created once the tiers are resolved.
+type overlay struct {
+	arg  string
+	trap *trapMount
+}
+
+// trapMount is a write-trapped directory. Rel is where its changes land,
+// relative to the workspace, for messages.
+type trapMount struct {
+	Host string
+	Dest string
+	Rel  string
+}
+
+// addPathOverlay overlays the workspace path rel with Mode "ro", "rw", "h", or
+// "wt". A missing host path is skipped; label names the entry in error messages.
+func addPathOverlay(overlays map[string]overlay, cwd string, selinux bool, hides *container.HidePlaceholders, rel, mode, label string) error {
 	hostPath := filepath.Join(cwd, filepath.FromSlash(rel))
 	info, err := os.Stat(hostPath)
 	if os.IsNotExist(err) {
@@ -99,20 +114,25 @@ func addPathOverlay(overlays map[string]string, cwd string, selinux bool, hides 
 	dest := path.Join("/workspace", filepath.ToSlash(rel))
 	switch mode {
 	case "ro", "rw":
-		overlays[dest] = hostPath + ":" + dest + container.MountOpts(mode, selinux)
+		overlays[dest] = overlay{arg: hostPath + ":" + dest + container.MountOpts(mode, selinux)}
+	case "wt":
+		if !info.IsDir() {
+			return fmt.Errorf("%s: wt only works on directories, so trap its parent directory instead", label)
+		}
+		overlays[dest] = overlay{trap: &trapMount{Host: hostPath, Dest: dest, Rel: rel}}
 	case "h":
 		// Hide the host path by binding an empty placeholder over it.
 		empty, err := hides.Get(info.IsDir())
 		if err != nil {
 			return fmt.Errorf("%s: %w", label, err)
 		}
-		overlays[dest] = empty + ":" + dest + container.MountOpts("ro", selinux)
+		overlays[dest] = overlay{arg: empty + ":" + dest + container.MountOpts("ro", selinux)}
 	}
 	return nil
 }
 
 // addProtection resolves a "PATH:MODE" protection spec into an overlay.
-func addProtection(overlays map[string]string, cwd string, selinux bool, hides *container.HidePlaceholders, spec string) error {
+func addProtection(overlays map[string]overlay, cwd string, selinux bool, hides *container.HidePlaceholders, spec string) error {
 	prot, err := container.ParseProtection(spec)
 	if err != nil {
 		return err
@@ -122,7 +142,7 @@ func addProtection(overlays map[string]string, cwd string, selinux bool, hides *
 
 // addLocalMount resolves a .dp/mounts.json entry. Without a source it overlays
 // the workspace path; with one it binds .dp/<source> at Dest and hides the source.
-func addLocalMount(overlays map[string]string, cwd string, selinux bool, hides *container.HidePlaceholders, m localMount) error {
+func addLocalMount(overlays map[string]overlay, cwd string, selinux bool, hides *container.HidePlaceholders, m localMount) error {
 	if m.Source == "" {
 		return addPathOverlay(overlays, cwd, selinux, hides, m.Dest, m.Mode, fmt.Sprintf("local mount %q", m.Dest))
 	}
@@ -142,38 +162,50 @@ func addLocalMount(overlays map[string]string, cwd string, selinux bool, hides *
 	if err != nil {
 		return fmt.Errorf("local mount %q: %w", m.Source, err)
 	}
-	overlays[hideDest] = empty + ":" + hideDest + container.MountOpts("ro", selinux)
+	overlays[hideDest] = overlay{arg: empty + ":" + hideDest + container.MountOpts("ro", selinux)}
 
 	// Bind the real content at the destination.
 	dest := path.Join("/workspace", m.Dest)
-	overlays[dest] = hostSource + ":" + dest + container.MountOpts(m.Mode, selinux)
+	if m.Mode == "wt" {
+		overlays[dest] = overlay{trap: &trapMount{Host: hostSource, Dest: dest, Rel: path.Join(".dp", m.Source)}}
+		return nil
+	}
+	overlays[dest] = overlay{arg: hostSource + ":" + dest + container.MountOpts(m.Mode, selinux)}
 	return nil
 }
 
 // buildWorkspaceOverlays assembles the overlay mounts on top of /workspace.
-// Later tiers win per destination: workspace, then .dp/, then args.
-func buildWorkspaceOverlays(cwd string, selinux bool, hides *container.HidePlaceholders, workspaceSpecs []string, localMounts []localMount, argSpecs []string) ([]string, error) {
-	overlays := map[string]string{}
+// Later tiers win per destination: workspace, then .dp/, then args. It returns
+// the -v args, plus the wt directories still needing a layer and an arg.
+// canTrap is whether wt mounts work with this runtime.
+func buildWorkspaceOverlays(cwd string, selinux, canTrap bool, hides *container.HidePlaceholders, workspaceSpecs []string, localMounts []localMount, argSpecs []string) ([]string, []trapMount, error) {
+	overlays := map[string]overlay{}
 
-	// .dp/ is dp's control plane, consumed on the host, so default it to read only.
-	// Seeded first (lowest priority) so a mount or arg can reopen it; skipped if absent.
-	if err := addPathOverlay(overlays, cwd, selinux, hides, ".dp", "ro", "workspace .dp"); err != nil {
-		return nil, err
+	// .dp/ is dp's control plane, consumed on the host, so a tool must not change
+	// it behind the user's back: its writes are trapped for the user to review,
+	// or, where wt mounts don't work, refused. Seeded first (lowest priority) so
+	// a mount or arg can reopen it; skipped if absent.
+	dpMode := "ro"
+	if canTrap {
+		dpMode = "wt"
+	}
+	if err := addPathOverlay(overlays, cwd, selinux, hides, ".dp", dpMode, "workspace .dp"); err != nil {
+		return nil, nil, err
 	}
 
 	for _, spec := range workspaceSpecs {
 		if err := addProtection(overlays, cwd, selinux, hides, spec); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	for _, m := range localMounts {
 		if err := addLocalMount(overlays, cwd, selinux, hides, m); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	for _, spec := range argSpecs {
 		if err := addProtection(overlays, cwd, selinux, hides, spec); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
@@ -182,9 +214,14 @@ func buildWorkspaceOverlays(cwd string, selinux bool, hides *container.HidePlace
 		dests = append(dests, d)
 	}
 	sort.Strings(dests)
-	args := make([]string, len(dests))
-	for i, d := range dests {
-		args[i] = overlays[d]
+	var args []string
+	var traps []trapMount
+	for _, d := range dests {
+		if o := overlays[d]; o.trap != nil {
+			traps = append(traps, *o.trap)
+		} else {
+			args = append(args, o.arg)
+		}
 	}
-	return args, nil
+	return args, traps, nil
 }

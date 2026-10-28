@@ -36,7 +36,8 @@ func TestLoadLocalMounts(t *testing.T) {
 		"mounts": [
 			{"source": "./secrets", "path": "config/secrets", "mode": "ro"},
 			{"source": "cache", "path": "cache", "mode": "rw"},
-			{"path": "node_modules", "mode": "h"}
+			{"path": "node_modules", "mode": "h"},
+			{"path": "vendor", "mode": "wt"}
 		]
 	}`)
 
@@ -49,6 +50,7 @@ func TestLoadLocalMounts(t *testing.T) {
 		{Source: "cache", Dest: "cache", Mode: "rw"},
 		{Source: "secrets", Dest: "config/secrets", Mode: "ro"},
 		{Source: "", Dest: "node_modules", Mode: "h"},
+		{Source: "", Dest: "vendor", Mode: "wt"},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %v, want %v", got, want)
@@ -86,7 +88,7 @@ func TestBuildWorkspaceOverlaysLocalHide(t *testing.T) {
 	hides := container.NewHidePlaceholders(filepath.Join(t.TempDir(), "placeholders"))
 
 	mounts := []localMount{{Dest: "node_modules", Mode: "h"}}
-	args, err := buildWorkspaceOverlays(cwd, false, hides, nil, mounts, nil)
+	args, _, err := buildWorkspaceOverlays(cwd, false, false, hides, nil, mounts, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -107,8 +109,8 @@ func TestBuildWorkspaceOverlaysDpReadOnly(t *testing.T) {
 	}
 	hides := container.NewHidePlaceholders(filepath.Join(t.TempDir(), "placeholders"))
 
-	// With no protections or mounts at all, .dp is still bound read-only.
-	args, err := buildWorkspaceOverlays(cwd, false, hides, nil, nil, nil)
+	// With no protections or mounts at all, and no wt support, .dp is still bound read-only.
+	args, _, err := buildWorkspaceOverlays(cwd, false, false, hides, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -121,10 +123,40 @@ func TestBuildWorkspaceOverlaysDpReadOnly(t *testing.T) {
 	}
 }
 
+// Where wt mounts work, .dp is write-trapped instead of read-only.
+func TestBuildWorkspaceOverlaysDpTrapped(t *testing.T) {
+	cwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, ".dp"), 0755); err != nil {
+		t.Fatalf("failed to create .dp: %v", err)
+	}
+	hides := container.NewHidePlaceholders(filepath.Join(t.TempDir(), "placeholders"))
+
+	args, traps, err := buildWorkspaceOverlays(cwd, false, true, hides, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(args) != 0 {
+		t.Errorf("expected no plain overlays, got %v", args)
+	}
+	want := trapMount{Host: filepath.Join(cwd, ".dp"), Dest: "/workspace/.dp", Rel: ".dp"}
+	if len(traps) != 1 || traps[0] != want {
+		t.Errorf("traps = %+v, want [%+v]", traps, want)
+	}
+
+	// Still the lowest priority: an arg can reopen it.
+	args, traps, err = buildWorkspaceOverlays(cwd, false, true, hides, nil, nil, []string{".dp:rw"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got, ok := mountArgFor(args, "/workspace/.dp"); !ok || len(traps) != 0 || !strings.HasSuffix(got, ":rw") {
+		t.Errorf("expected --mp to reopen .dp read-write, got args %v traps %+v", args, traps)
+	}
+}
+
 func TestBuildWorkspaceOverlaysDpAbsentSkipped(t *testing.T) {
 	cwd := t.TempDir() // no .dp/ here
 	hides := container.NewHidePlaceholders(filepath.Join(t.TempDir(), "placeholders"))
-	args, err := buildWorkspaceOverlays(cwd, false, hides, nil, nil, nil)
+	args, _, err := buildWorkspaceOverlays(cwd, false, false, hides, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -141,7 +173,7 @@ func TestBuildWorkspaceOverlaysDpOverridable(t *testing.T) {
 	}
 	hides := container.NewHidePlaceholders(filepath.Join(t.TempDir(), "placeholders"))
 
-	args, err := buildWorkspaceOverlays(cwd, false, hides, nil, nil, []string{".dp:rw"})
+	args, _, err := buildWorkspaceOverlays(cwd, false, false, hides, nil, nil, []string{".dp:rw"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -175,7 +207,7 @@ func TestBuildWorkspaceOverlaysLocalMount(t *testing.T) {
 	hides := container.NewHidePlaceholders(filepath.Join(t.TempDir(), "placeholders"))
 
 	mounts := []localMount{{Source: "secrets", Dest: "config", Mode: "ro"}}
-	args, err := buildWorkspaceOverlays(cwd, false, hides, nil, mounts, nil)
+	args, _, err := buildWorkspaceOverlays(cwd, false, false, hides, nil, mounts, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -202,7 +234,7 @@ func TestBuildWorkspaceOverlaysMissingSource(t *testing.T) {
 	cwd := t.TempDir()
 	hides := container.NewHidePlaceholders(filepath.Join(t.TempDir(), "placeholders"))
 	mounts := []localMount{{Source: "secrets", Dest: "config", Mode: "ro"}}
-	if _, err := buildWorkspaceOverlays(cwd, false, hides, nil, mounts, nil); err == nil {
+	if _, _, err := buildWorkspaceOverlays(cwd, false, false, hides, nil, mounts, nil); err == nil {
 		t.Fatal("expected an error for a missing .dp source folder")
 	}
 }
@@ -221,7 +253,7 @@ func TestBuildWorkspaceOverlaysPriority(t *testing.T) {
 	mounts := []localMount{{Source: "src", Dest: "shared", Mode: "ro"}}
 
 	// Workspace hides /workspace/shared, .dp mounts over it rw, args force it ro.
-	args, err := buildWorkspaceOverlays(cwd, false, hides, []string{"shared:h"}, mounts, []string{"shared:ro"})
+	args, _, err := buildWorkspaceOverlays(cwd, false, false, hides, []string{"shared:h"}, mounts, []string{"shared:ro"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -236,5 +268,79 @@ func TestBuildWorkspaceOverlaysPriority(t *testing.T) {
 	// The args-level ro protection wins: it binds the real host path read-only.
 	if !strings.HasPrefix(got, filepath.Join(cwd, "shared")+":") || !strings.HasSuffix(got, ":ro") {
 		t.Errorf("expected args-level ro to win, got %q", got)
+	}
+}
+
+// A wt directory comes back as a trap, not a -v arg; its layer is made later.
+func TestBuildWorkspaceOverlaysTrap(t *testing.T) {
+	cwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, ".git"), 0755); err != nil {
+		t.Fatalf("failed to create dir: %v", err)
+	}
+	hides := container.NewHidePlaceholders(filepath.Join(t.TempDir(), "placeholders"))
+
+	args, traps, err := buildWorkspaceOverlays(cwd, false, false, hides, nil, nil, []string{".git:wt"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := mountArgFor(args, "/workspace/.git"); ok {
+		t.Errorf("wt dir should not get a plain -v arg: %v", args)
+	}
+	want := trapMount{Host: filepath.Join(cwd, ".git"), Dest: "/workspace/.git", Rel: ".git"}
+	if len(traps) != 1 || traps[0] != want {
+		t.Errorf("traps = %+v, want [%+v]", traps, want)
+	}
+}
+
+// A later tier replacing a wt destination drops the trap.
+func TestBuildWorkspaceOverlaysTrapOverridden(t *testing.T) {
+	cwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, ".git"), 0755); err != nil {
+		t.Fatalf("failed to create dir: %v", err)
+	}
+	hides := container.NewHidePlaceholders(filepath.Join(t.TempDir(), "placeholders"))
+
+	args, traps, err := buildWorkspaceOverlays(cwd, false, false, hides, []string{".git:wt"}, nil, []string{".git:ro"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(traps) != 0 {
+		t.Errorf("expected the ro arg to replace the trap, got %+v", traps)
+	}
+	if _, ok := mountArgFor(args, "/workspace/.git"); !ok {
+		t.Errorf("expected a ro overlay at /workspace/.git in %v", args)
+	}
+}
+
+func TestBuildWorkspaceOverlaysTrapFileRejected(t *testing.T) {
+	cwd := t.TempDir()
+	if err := os.WriteFile(filepath.Join(cwd, ".env"), []byte("X=1"), 0644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
+	hides := container.NewHidePlaceholders(filepath.Join(t.TempDir(), "placeholders"))
+	if _, _, err := buildWorkspaceOverlays(cwd, false, false, hides, nil, nil, []string{".env:wt"}); err == nil {
+		t.Fatal("expected wt on a file to be rejected")
+	}
+}
+
+// A wt mount with a source traps writes to the .dp folder, still hidden at .dp.
+func TestBuildWorkspaceOverlaysTrapLocalSource(t *testing.T) {
+	cwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, ".dp", "scratch"), 0755); err != nil {
+		t.Fatalf("failed to create dir: %v", err)
+	}
+	hides := container.NewHidePlaceholders(filepath.Join(t.TempDir(), "placeholders"))
+	mounts := []localMount{{Source: "scratch", Dest: "scratch", Mode: "wt"}}
+
+	args, traps, err := buildWorkspaceOverlays(cwd, false, false, hides, nil, mounts, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := trapMount{Host: filepath.Join(cwd, ".dp", "scratch"), Dest: "/workspace/scratch", Rel: ".dp/scratch"}
+	if len(traps) != 1 || traps[0] != want {
+		t.Errorf("traps = %+v, want [%+v]", traps, want)
+	}
+	if _, ok := mountArgFor(args, "/workspace/.dp/scratch"); !ok {
+		t.Errorf("expected the source hidden at /workspace/.dp/scratch in %v", args)
 	}
 }

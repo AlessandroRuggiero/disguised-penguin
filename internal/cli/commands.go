@@ -786,14 +786,14 @@ var workspaceProtectionCmd = &cobra.Command{
 	Use:     "protection",
 	Aliases: []string{"prot"},
 	Short:   "Manage mount protections for a workspace",
-	Long:    "Manage mount protections for a workspace.\nA protection remounts a path within the workspace read-only (ro), writable (rw), or hidden (h) whenever a CLI runs against that workspace.",
+	Long:    "Manage mount protections for a workspace.\nA protection remounts a path within the workspace read-only (ro), writable (rw), hidden (h), or write-trapped (wt) whenever a CLI runs against that workspace.",
 }
 
 var workspaceProtectionAddCmd = &cobra.Command{
 	Use:     "add [workspace] [path:mode]",
 	Aliases: []string{"a"},
-	Short:   "Protect a path within a workspace (mode: ro, rw, or h)",
-	Long:    "Protect a path within a workspace so it is remounted read-only (ro), writable (rw), or hidden (h) whenever a CLI runs against that workspace.\nThe path is relative to the workspace root. Re-adding an existing path updates its mode.",
+	Short:   "Protect a path within a workspace (mode: ro, rw, h, or wt)",
+	Long:    "Protect a path within a workspace so it is remounted read-only (ro), writable (rw), hidden (h), or write-trapped (wt) whenever a CLI runs against that workspace.\nA wt directory takes writes, but they only reach the host if committed after the run (see the wt_commit setting); it needs rootless podman.\nThe path is relative to the workspace root. Re-adding an existing path updates its mode.",
 	Example: `  dp workspace protection add default .git:ro
   dp ws protection add dev .env:h`,
 	Args: cobra.ExactArgs(2),

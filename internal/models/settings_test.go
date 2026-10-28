@@ -37,3 +37,18 @@ func TestLookupSettingUnknown(t *testing.T) {
 		t.Errorf("expected unknown setting")
 	}
 }
+
+func TestWtCommitSetting(t *testing.T) {
+	def, ok := LookupSetting(string(SettingWtCommit))
+	if !ok {
+		t.Fatalf("wt_commit not registered")
+	}
+	if def.Default != int(WtAsk) {
+		t.Errorf("default = %d, want ask", def.Default)
+	}
+	for in, want := range map[string]WtCommit{"discard": WtDiscard, "ask": WtAsk, "flag": WtFlag} {
+		if got, err := def.Parse(in); err != nil || WtCommit(got) != want {
+			t.Errorf("Parse(%q) = %d, %v", in, got, err)
+		}
+	}
+}
