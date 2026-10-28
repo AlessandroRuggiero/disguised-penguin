@@ -188,6 +188,15 @@ func requireRootlessPodman(t *testing.T) {
 func trapFixture(t *testing.T) (dir, data string) {
 	t.Helper()
 	data = t.TempDir()
+	// runPTY points XDG_DATA_HOME at data, so rootless podman keeps its storage
+	// there too, and the image layers it unpacks are owned by subordinate UIDs
+	// that only `podman unshare` can delete. Registered after TempDir, so it
+	// runs before TempDir's own cleanup.
+	t.Cleanup(func() {
+		if out, err := exec.Command("podman", "unshare", "rm", "-rf", filepath.Join(data, "containers")).CombinedOutput(); err != nil {
+			t.Logf("failed to remove podman storage: %v: %s", err, out)
+		}
+	})
 	dir = t.TempDir()
 	for name, content := range map[string]string{"keep.txt": "keep", "edit.txt": "before", "drop.txt": "drop"} {
 		p := filepath.Join(dir, "trap", name)
