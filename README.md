@@ -239,6 +239,7 @@ Your working directory is mounted read-write into the container by default. Moun
 - `ro`: read-only (the tool can read the path but not modify it)
 - `rw`: read-write (used to re-open a path that a broader protection covers)
 - `h`: hidden (shadowed by an empty mount, so the tool sees nothing there)
+- `wt`: write-trapped (the tool reads the real files and can write to them, but its writes are held back and only reach your files if you commit them after the run; see below)
 
 Protections are stored per-workspace and applied automatically every time you run a CLI in that workspace.
 
@@ -265,6 +266,38 @@ To apply a protection for a single run instead of persisting it, use the `--mp` 
 ```bash
 dp --mp .git:ro --mp .env:h <cli-name> [args...]
 ```
+
+#### Write-Trapped Paths (`wt`)
+
+A `wt` directory behaves normally inside the container: the tool sees the real contents and its own writes, deletes included. Those writes are kept in an overlay layer outside your workspace, though, and when the CLI exits `dp` lists them and commits or discards them:
+
+```
+Write-trapped changes in vendor (3):
+  A  lib/new.go
+  M  lib/old.go
+  D  lib/unused.go
+Commit these changes to vendor? (y/N):
+```
+
+What happens is set by the `wt_commit` setting (`dp settings set wt_commit <value>`):
+
+- `ask` (default): list the changes and ask, once per `wt` directory. With no terminal to ask on, they are discarded.
+- `flag`: commit only when the run was started with `--commit`, otherwise discard.
+- `discard`: always throw them away.
+
+`--commit` goes before the CLI name, like `--mp`, and also skips the `ask` prompt:
+
+```bash
+dp --commit --mp vendor:wt <cli-name> [args...]
+```
+
+Things to know:
+
+- `wt` needs **rootless podman on Linux**; with docker or as root, `dp` refuses to start. It works on directories only (not on single files, and not on the workspace root).
+- Committing replays the tool's version over yours: if you edit a trapped file on the host during the run, the tool's copy wins. Podman also advises against changing an overlaid directory while it is mounted.
+- A commit only writes inside the `wt` directory, never through a symlink out of it, and only creates directories, regular files and symlinks. Devices, FIFOs and sockets are skipped, and setuid/setgid bits are dropped.
+- If `dp` is killed before it can settle a run, the layer is kept, and the next `dp` run offers it under the same `wt_commit` rules (honoring that run's `--commit`).
+- Until a run is settled, its writes take space under `dp`'s data directory (`~/.local/share/disguised-penguin/overlays`).
 
 ### Show a CLI in the System Monitor
 
@@ -318,8 +351,9 @@ A project can overlay its workspace for every CLI run from that directory by lis
 
 - `ro` / `rw`: mount something at `path` read-only or read-write.
 - `h`: hide `path` (shadow it with an empty mount).
+- `wt`: write-trap `path` (see [Write-Trapped Paths](#write-trapped-paths-wt)); with a `source`, commits land in that `.dp/` folder.
 
-An optional `source` names a folder under `.dp/` to expose at `path`. When set, that folder is mounted at `path` and **hidden at its original `.dp/` location**, so the tool only sees it where you put it. `source` is only valid with `ro`/`rw`.
+An optional `source` names a folder under `.dp/` to expose at `path`. When set, that folder is mounted at `path` and **hidden at its original `.dp/` location**, so the tool only sees it where you put it. `source` works with `ro`, `rw` and `wt`, not with `h`.
 
 ```json
 {
@@ -335,7 +369,7 @@ With the file above, `.dp/secrets` appears at `/workspace/config/secrets` read-o
 
 When the same destination is targeted from more than one place, the effective priority is **workspace-level protections → `.dp/mounts.json` → `--mp` args**, so a per-run `--mp` always wins.
 
-The `.dp/` directory itself is dp's control plane (build files, `variants.json`, `mounts.json`, and a `README.md` guide that `dp local variant extend` writes once) and is consumed on the host, so it is mounted **read-only** by default, so a sandboxed tool can't tamper with the recipes that govern future runs. This is the lowest-priority overlay, so a `.dp/mounts.json` entry or a `--mp .dp/...:rw` can still re-open a subpath if you really need it writable.
+The `.dp/` directory itself is dp's control plane (build files, `variants.json`, `mounts.json`, and a `README.md` guide that `dp local variant extend` writes once) and is consumed on the host, so a sandboxed tool must not tamper with the recipes that govern future runs. With rootless podman on Linux it is **write-trapped** by default (see [Write-Trapped Paths](#write-trapped-paths-wt)): a tool can propose changes to it, and you review them before they land. With any other runtime, where `wt` doesn't work, it is mounted **read-only**. This is the lowest-priority overlay, so a `.dp/mounts.json` entry or a `--mp .dp/...:rw` can still re-open a subpath if you really need it writable.
 
 ### Settings
 

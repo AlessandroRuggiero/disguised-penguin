@@ -12,7 +12,10 @@ import (
 
 type SettingKey string
 
-const SettingAliasMode SettingKey = "alias_mode"
+const (
+	SettingAliasMode SettingKey = "alias_mode"
+	SettingWtCommit  SettingKey = "wt_commit"
+)
 
 type AliasMode int
 
@@ -20,6 +23,14 @@ const (
 	AliasNone AliasMode = 0
 	AliasSome AliasMode = 1
 	AliasAll  AliasMode = 2
+)
+
+type WtCommit int
+
+const (
+	WtDiscard WtCommit = 0
+	WtAsk     WtCommit = 1
+	WtFlag    WtCommit = 2
 )
 
 type SettingValue struct {
@@ -44,6 +55,16 @@ var settingDefs = []SettingDef{
 			{int(AliasNone), "none", "no aliases"},
 			{int(AliasSome), "some", "only CLIs enabled with 'dp alias add'"},
 			{int(AliasAll), "all", "every installed CLI"},
+		},
+	},
+	{
+		Key:         SettingWtCommit,
+		Description: "What happens to the writes trapped in wt mounts when a CLI exits",
+		Default:     int(WtAsk),
+		Values: []SettingValue{
+			{int(WtDiscard), "discard", "always throw them away"},
+			{int(WtAsk), "ask", "list them and ask whether to commit (discarded with no terminal)"},
+			{int(WtFlag), "flag", "commit only when the run was started with --commit"},
 		},
 	},
 }

@@ -5,16 +5,19 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"os/signal"
 	"os/user"
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"disguised-penguin/internal/container"
 	"disguised-penguin/internal/db"
 	"disguised-penguin/internal/models"
 	"disguised-penguin/internal/remote"
+	"disguised-penguin/internal/trap"
 	"disguised-penguin/internal/workspace"
 
 	"github.com/spf13/cobra"
@@ -87,6 +90,7 @@ var rootCmd = &cobra.Command{
 		runtimeRequested := containerRuntimeFlag
 		var mpSpecs []string
 		monitor := false
+		commitFlag := false
 
 		for len(cliArgs) > 0 {
 			if cliArgs[0] == "-w" || cliArgs[0] == "--workspace" {
@@ -118,6 +122,9 @@ var rootCmd = &cobra.Command{
 				cliArgs = cliArgs[1:]
 			} else if cliArgs[0] == "--monitor" {
 				monitor = true
+				cliArgs = cliArgs[1:]
+			} else if cliArgs[0] == "--commit" {
+				commitFlag = true
 				cliArgs = cliArgs[1:]
 			} else if cliArgs[0] == "-v" || cliArgs[0] == "--version" {
 				// DisableFlagParsing means cobra won't handle these itself; do it
@@ -259,7 +266,7 @@ var rootCmd = &cobra.Command{
 
 		// Mount protections (--mp PATH:MODE) and .dp/mounts.json overlay nested
 		// mounts on top of the /workspace bind so a subpath can be made read-only,
-		// writable, or hidden, or a folder under .dp/ can be exposed elsewhere. The
+		// writable, hidden, or write-trapped, or a folder under .dp/ can be exposed elsewhere. The
 		// runtime mounts by destination depth, so these always shadow the broader
 		// /workspace mount regardless of arg order.
 		dbPath, err := db.GetDBPath()
@@ -280,12 +287,65 @@ var rootCmd = &cobra.Command{
 		}
 
 		// Priority on a shared destination is workspace-level < .dp-level < args-level.
-		overlays, err := buildWorkspaceOverlays(cwd, selinux, hides, workspaceProtSpecs, localMounts, mpSpecs)
+		canTrap := goruntime.GOOS == "linux" && runtime == container.RuntimePodman && os.Geteuid() != 0
+		overlays, trapMounts, err := buildWorkspaceOverlays(cwd, selinux, canTrap, hides, workspaceProtSpecs, localMounts, mpSpecs)
 		if err != nil {
 			return err
 		}
 		for _, overlay := range overlays {
 			runtimeArgs = append(runtimeArgs, "-v", overlay)
+		}
+
+		wtValue, err := store.GetSetting(models.SettingWtCommit)
+		if err != nil {
+			return err
+		}
+		wtPolicy := models.WtCommit(wtValue)
+		tty := container.StdioIsTerminal()
+
+		// Offer what earlier runs left behind before this one starts, whether or
+		// not it traps anything itself.
+		if goruntime.GOOS == "linux" {
+			if err := settleOrphans(wtPolicy, tty); err != nil {
+				return err
+			}
+		}
+
+		// wt mounts trap the tool's writes in an overlay layer dp owns, settled
+		// after the run. They rely on podman's overlay volumes, and only rootless:
+		// committing as root would mean a root process writing files a container
+		// chose onto the host.
+		var traps *trap.Session
+		if len(trapMounts) > 0 {
+			if !canTrap {
+				return fmt.Errorf("wt mounts need rootless podman on Linux (requested for %s)", trapMounts[0].Rel)
+			}
+			if wtPolicy == models.WtDiscard && commitFlag {
+				return fmt.Errorf("--commit has no effect while wt_commit is 'discard' (see 'dp settings set wt_commit')")
+			}
+
+			base, err := overlaysDir()
+			if err != nil {
+				return err
+			}
+			if traps, err = trap.NewSession(base, commitFlag); err != nil {
+				return err
+			}
+			// Cleared once the run is settled; until then any return discards it.
+			defer func() {
+				if traps != nil {
+					traps.Remove(removeTree)
+				}
+			}()
+			for _, m := range trapMounts {
+				layer, err := traps.Add(m.Host, m.Rel)
+				if err != nil {
+					return fmt.Errorf("failed to trap writes to %s: %w", m.Rel, err)
+				}
+				runtimeArgs = append(runtimeArgs, "-v", container.TrapMountArg(m.Host, m.Dest, layer.Upper(), layer.Work()))
+			}
+		} else if commitFlag {
+			return fmt.Errorf("--commit only applies to wt mounts, and this run has none")
 		}
 
 		for hostPort, containerPort := range cli.PortMappings {
@@ -329,8 +389,37 @@ var rootCmd = &cobra.Command{
 		runtimeCmd.Stdout = os.Stdout
 		runtimeCmd.Stderr = os.Stderr
 
-		if err := runtimeCmd.Run(); err != nil {
-			return fmt.Errorf("failed to run container with %s: %w", runtime, err)
+		if traps == nil {
+			if err := runtimeCmd.Run(); err != nil {
+				return fmt.Errorf("failed to run container with %s: %w", runtime, err)
+			}
+			return nil
+		}
+
+		// dp has to outlive the container to settle the layers. A terminal's
+		// Ctrl-C already reaches podman through the process group, so dp only
+		// swallows its own copy; a SIGTERM or SIGHUP aimed at dp alone is passed
+		// on so the container stops and the settle step still runs.
+		sigs := make(chan os.Signal, 1)
+		signal.Notify(sigs, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+		defer signal.Stop(sigs)
+		runErr := runtimeCmd.Start()
+		if runErr == nil {
+			go func() {
+				for sig := range sigs {
+					if sig != os.Interrupt {
+						runtimeCmd.Process.Signal(sig)
+					}
+				}
+			}()
+			runErr = runtimeCmd.Wait()
+		}
+
+		// Settled even when the tool failed: what it wrote may still be wanted.
+		settleSession(traps, wtPolicy, tty)
+		traps = nil
+		if runErr != nil {
+			return fmt.Errorf("failed to run container with %s: %w", runtime, runErr)
 		}
 		return nil
 	},
