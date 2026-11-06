@@ -493,7 +493,7 @@ A package that opens windows (an editor, a desktop app, a CUDA viewer) sets `"ap
 
 On every run, `dp` reads your session and adds:
 
-- **Display**: your Wayland socket (from `WAYLAND_DISPLAY`/`XDG_RUNTIME_DIR`), bound into a private tmpfs `XDG_RUNTIME_DIR` inside the container (owned by your UID/GID, mode `0700`). Only the compositor socket is shared, not the rest of `/run/user`. `XDG_SESSION_TYPE=wayland` tells GTK, Qt and Electron to use it.
+- **Display**: your Wayland socket (from `WAYLAND_DISPLAY`/`XDG_RUNTIME_DIR`), bound into a private tmpfs `XDG_RUNTIME_DIR` inside the container (on Docker owned by your UID/GID with mode `0700`; podman rejects the `uid=`/`gid=` options, so there it is mode `1777`). Only the compositor socket is shared, not the rest of `/run/user`. `XDG_SESSION_TYPE=wayland` tells GTK, Qt and Electron to use it.
 - **GPU**: `/dev/dri` when it exists, for Mesa (Intel, AMD, nouveau) rendering.
 - **NVIDIA/CUDA**: when the NVIDIA driver is loaded, every NVIDIA GPU with its matching driver libraries, through the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/): `--device nvidia.com/gpu=all` (CDI) on podman, `--gpus all` on docker. If the toolkit is missing (on podman: no CDI spec; generate one with `sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`), `dp` warns and runs the app without CUDA.
 - **Time zone**: `TZ` set to your zone (your own `TZ`, else the zone `/etc/localtime` links to, else `/etc/timezone`), so the app doesn't show UTC times. Skipped if it can't be found.

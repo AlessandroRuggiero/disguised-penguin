@@ -132,15 +132,21 @@ func AppRunArgs(runtime Runtime, h AppHost) (args []string, warnings []string, e
 	// The entrypoint runs the app as the host user's UID (PUID), so this is
 	// the runtime dir that user expects.
 	runDir := "/run/user/" + h.UID
+	// Owned by that user and private to it, as the XDG spec requires:
+	// D-Bus and Qt complain about a root-owned, world-writable one.
+	tmpfsOpts := "rw,mode=0700,uid=" + h.UID + ",gid=" + h.GID + ",size=64m"
+	if runtime == RuntimePodman {
+		// Podman rejects uid=/gid= ("unknown mount option"), so the best it
+		// can do is a sticky world-writable dir the user can still write to.
+		tmpfsOpts = "rw,mode=1777,size=64m"
+	}
 	args = append(args,
 		"-e", "WAYLAND_DISPLAY="+name,
 		// With no X DISPLAY to fall back to, this tells GTK, Qt and Electron
 		// to go straight to Wayland.
 		"-e", "XDG_SESSION_TYPE=wayland",
 		"-e", "XDG_RUNTIME_DIR="+runDir,
-		// Owned by that user and private to it, as the XDG spec requires:
-		// D-Bus and Qt complain about a root-owned, world-writable one.
-		"--tmpfs", runDir+":rw,mode=0700,uid="+h.UID+",gid="+h.GID+",size=64m",
+		"--tmpfs", runDir+":"+tmpfsOpts,
 		"-v", socket+":"+runDir+"/"+name,
 	)
 

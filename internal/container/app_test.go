@@ -29,6 +29,17 @@ func hasSeq(args []string, want ...string) bool {
 	return false
 }
 
+// Docker passes tmpfs options to the kernel, so it can give the dir its owner.
+func TestAppRunArgsDockerTmpfsOwner(t *testing.T) {
+	args, _, err := AppRunArgs(RuntimeDocker, waylandHost(t))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasSeq(args, "--tmpfs", "/run/user/1234:rw,mode=0700,uid=1234,gid=5678,size=64m") {
+		t.Errorf("missing owned tmpfs in %v", args)
+	}
+}
+
 func TestAppRunArgsWayland(t *testing.T) {
 	h := waylandHost(t)
 	args, warnings, err := AppRunArgs(RuntimePodman, h)
@@ -42,7 +53,7 @@ func TestAppRunArgsWayland(t *testing.T) {
 		{"-e", "WAYLAND_DISPLAY=wayland-1"},
 		{"-e", "XDG_SESSION_TYPE=wayland"},
 		{"-e", "XDG_RUNTIME_DIR=/run/user/1234"},
-		{"--tmpfs", "/run/user/1234:rw,mode=0700,uid=1234,gid=5678,size=64m"},
+		{"--tmpfs", "/run/user/1234:rw,mode=1777,size=64m"},
 		{"-v", filepath.Join(h.RuntimeDir, "wayland-1") + ":/run/user/1234/wayland-1"},
 		{"--shm-size=1g"},
 	} {
