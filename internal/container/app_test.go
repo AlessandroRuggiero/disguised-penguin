@@ -222,27 +222,41 @@ func TestAppRunArgsHostFeatures(t *testing.T) {
 	}
 }
 
-func TestAppRunArgsNvidia(t *testing.T) {
+// The NVIDIA GPU is opt-in (CUDARunArgs), so an app never gets it on its own.
+func TestAppRunArgsNoNvidia(t *testing.T) {
+	h := waylandHost(t)
+	h.NVIDIA, h.NVIDIACDI, h.NVIDIAToolkit = true, true, true
+	for _, rt := range []Runtime{RuntimePodman, RuntimeDocker} {
+		args, warnings, err := AppRunArgs(rt, h)
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", rt, err)
+		}
+		if slices.Contains(args, "--gpus") || slices.Contains(args, "nvidia.com/gpu=all") || len(warnings) != 0 {
+			t.Errorf("%s: app got NVIDIA flags or warnings: %v %v", rt, args, warnings)
+		}
+	}
+}
+
+func TestCUDARunArgs(t *testing.T) {
 	cases := []struct {
 		name     string
 		runtime  Runtime
+		nvidia   bool
 		cdi      bool
 		toolkit  bool
 		want     []string
 		warnLike string
 	}{
-		{"podman with CDI", RuntimePodman, true, false, []string{"--device", "nvidia.com/gpu=all"}, ""},
-		{"docker with toolkit", RuntimeDocker, false, true, []string{"--gpus", "all", "-e", "NVIDIA_DRIVER_CAPABILITIES=all"}, ""},
-		{"podman without CDI", RuntimePodman, false, true, nil, "nvidia-ctk cdi generate"},
-		{"docker without toolkit", RuntimeDocker, true, false, nil, "NVIDIA Container Toolkit"},
+		{"podman with CDI", RuntimePodman, true, true, false, []string{"--device", "nvidia.com/gpu=all"}, ""},
+		{"docker with toolkit", RuntimeDocker, true, false, true, []string{"--gpus", "all", "-e", "NVIDIA_DRIVER_CAPABILITIES=all"}, ""},
+		{"podman without CDI", RuntimePodman, true, false, true, nil, "nvidia-ctk cdi generate"},
+		{"docker without toolkit", RuntimeDocker, true, true, false, nil, "NVIDIA Container Toolkit"},
+		{"no NVIDIA driver", RuntimePodman, false, true, true, nil, "no NVIDIA driver"},
 	}
 	for _, tc := range cases {
-		h := waylandHost(t)
-		h.NVIDIA, h.NVIDIACDI, h.NVIDIAToolkit = true, tc.cdi, tc.toolkit
-		args, warnings, err := AppRunArgs(tc.runtime, h)
-		if err != nil {
-			t.Fatalf("%s: unexpected error: %v", tc.name, err)
-		}
+		// No Wayland: headless CLIs can have CUDA too.
+		h := AppHost{OS: "linux", NVIDIA: tc.nvidia, NVIDIACDI: tc.cdi, NVIDIAToolkit: tc.toolkit}
+		args, warnings := CUDARunArgs(tc.runtime, h)
 		if tc.want != nil && !hasSeq(args, tc.want...) {
 			t.Errorf("%s: missing %v in %v", tc.name, tc.want, args)
 		}

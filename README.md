@@ -331,6 +331,22 @@ dp local variant destroy <cli>
 
 `destroy` removes the image and dp's record of it but leaves `.dp/variants.json` and the build files alone, so `dp local variant build` brings a variant back.
 
+#### NVIDIA GPU and CUDA
+
+No CLI gets the NVIDIA GPU by default, graphical apps included. A project that needs CUDA turns it on for the variant of the CLI it runs, with `"cuda": true` in `.dp/variants.json`:
+
+```json
+{
+  "variants": {
+    "code": { "build_file": ".dp/build/code.Dockerfile", "cuda": true }
+  }
+}
+```
+
+That CLI, app or headless, then gets every NVIDIA GPU with its matching driver libraries through the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/): `--device nvidia.com/gpu=all` (CDI) on podman, `--gpus all` on docker. A headless CLI also gets `--shm-size=1g`, which CUDA data loaders need. The image must not ship its own NVIDIA driver libraries (CUDA runtimes such as PyTorch's are fine): the toolkit mounts the host's, which must match the kernel module. If there is no NVIDIA driver or no toolkit (on podman: no CDI spec; generate one with `sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`, unless the toolkit's `nvidia-cdi-refresh` service already writes `/var/run/cdi/nvidia.yaml`), `dp` warns and runs it without CUDA.
+
+Opt-in keeps the NVIDIA kernel driver out of reach of CLIs that don't use it, and on a hybrid laptop it stops an app from waking the dGPU, and draining the battery, just by opening it. Since `.dp/` is read-only or write-trapped inside the container, a CLI can't turn this on for itself.
+
 `dp` keeps a record of every variant it builds or runs, across all your projects, so you can manage them from anywhere:
 
 ```bash
@@ -483,7 +499,7 @@ The name is a warning in itself: prefer `configmounts` and `portmappings`, and r
 
 ### Graphical apps
 
-A package that opens windows (an editor, a desktop app, a CUDA viewer) sets `"app": true` instead of listing the display and GPU plumbing itself:
+A package that opens windows (an editor, a desktop app) sets `"app": true` instead of listing the display and GPU plumbing itself:
 
 ```json
 "code": {
@@ -495,8 +511,7 @@ A package that opens windows (an editor, a desktop app, a CUDA viewer) sets `"ap
 On every run, `dp` reads your session and adds:
 
 - **Display**: your Wayland socket (from `WAYLAND_DISPLAY`/`XDG_RUNTIME_DIR`), bound into a private tmpfs `XDG_RUNTIME_DIR` inside the container (on Docker owned by your UID/GID with mode `0700`; podman rejects the `uid=`/`gid=` options, so there it is mode `1777`). Only the compositor socket is shared, not the rest of `/run/user`. `XDG_SESSION_TYPE=wayland` tells GTK, Qt and Electron to use it.
-- **GPU**: `/dev/dri` when it exists, for Mesa (Intel, AMD, nouveau) rendering.
-- **NVIDIA/CUDA**: when the NVIDIA driver is loaded, every NVIDIA GPU with its matching driver libraries, through the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/): `--device nvidia.com/gpu=all` (CDI) on podman, `--gpus all` on docker. If the toolkit is missing (on podman: no CDI spec; generate one with `sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`), `dp` warns and runs the app without CUDA.
+- **GPU**: `/dev/dri` when it exists, for Mesa (Intel, AMD, nouveau) rendering. The NVIDIA GPU and CUDA are opt-in per project, see [NVIDIA GPU and CUDA](#nvidia-gpu-and-cuda).
 - **Time zone**: `TZ` set to your zone (your own `TZ`, else the zone `/etc/localtime` links to, else `/etc/timezone`), so the app doesn't show UTC times. Skipped if it can't be found.
 - **Shared memory**: `--shm-size=1g`, which Chromium/Electron and CUDA data loaders need.
 - **SELinux**: on SELinux hosts, `--security-opt label=disable`, because a confined container can't connect to the Wayland socket.

@@ -7,6 +7,7 @@ once and never overwrites it, so feel free to edit it.
 ## Files
 
 - `variants.json`: the CLIs this project extends, each with its build file.
+  Add `"cuda": true` to a variant to give that CLI the NVIDIA GPU with CUDA.
 - `build/<cli>.Dockerfile`: the recipe for a variant, starting `FROM` the
   installed CLI's image.
 - `mounts.json` (optional): extra overlays on `/workspace` for every run.

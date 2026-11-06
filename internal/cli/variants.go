@@ -71,6 +71,7 @@ func loadVariants(dir string) (map[string]models.Variant, error) {
 			Of:          cli,
 			BuildFile:   v.BuildFile,
 			LocalMounts: v.LocalMounts,
+			CUDA:        v.CUDA,
 		}
 	}
 	return variants, nil

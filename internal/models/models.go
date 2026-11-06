@@ -162,11 +162,13 @@ type Variant struct {
 	Of          string            `json:"of"`
 	BuildFile   string            `json:"build_file"`
 	LocalMounts map[string]string `json:"local_mounts,omitempty"`
+	CUDA        bool              `json:"cuda,omitempty"`
 }
 
 type FileVariant struct {
 	BuildFile   string            `json:"build_file"`
 	LocalMounts map[string]string `json:"local_mounts,omitempty"`
+	CUDA        bool              `json:"cuda,omitempty"` // also give the CLI the NVIDIA GPU, CUDA included
 }
 
 type VariantConfigFile struct {

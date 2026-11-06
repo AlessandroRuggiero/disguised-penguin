@@ -177,7 +177,7 @@ var rootCmd = &cobra.Command{
 		}
 
 		// Check whether there is a local variant
-		_, isVariant := variants[cliName]
+		variant, isVariant := variants[cliName]
 
 		dbWorkspace, exists, err := store.GetWorkspaceByName(workspaceName)
 
@@ -364,8 +364,13 @@ var rootCmd = &cobra.Command{
 		// every run, plus default hardening. Before the extra run args, so a
 		// package can still override these (e.g. a bigger --shm-size, a
 		// --cap-add, no-new-privileges=false).
+		cuda := isVariant && variant.CUDA
+		var host container.AppHost
+		if cli.App || cuda {
+			host = container.DetectAppHost(selinux)
+		}
 		if cli.App {
-			appArgs, warnings, err := container.AppRunArgs(runtime, container.DetectAppHost(selinux))
+			appArgs, warnings, err := container.AppRunArgs(runtime, host)
 			if err != nil {
 				return fmt.Errorf("'%s' is a graphical app: %w", cli.Name, err)
 			}
@@ -373,6 +378,20 @@ var rootCmd = &cobra.Command{
 				fmt.Fprintf(os.Stderr, "Warning: %s\n", w)
 			}
 			runtimeArgs = append(runtimeArgs, appArgs...)
+		}
+
+		// The NVIDIA GPU is opt-in per project, through the variant's "cuda",
+		// for apps and headless CLIs alike.
+		if cuda {
+			cudaArgs, warnings := container.CUDARunArgs(runtime, host)
+			for _, w := range warnings {
+				fmt.Fprintf(os.Stderr, "Warning: %s\n", w)
+			}
+			runtimeArgs = append(runtimeArgs, cudaArgs...)
+			// CUDA data loaders exhaust the 64MB default; apps already get 1g.
+			if len(cudaArgs) > 0 && !cli.App {
+				runtimeArgs = append(runtimeArgs, "--shm-size=1g")
+			}
 		}
 
 		// The package's own runtime options, accepted by the user at install

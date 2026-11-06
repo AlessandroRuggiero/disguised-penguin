@@ -37,7 +37,8 @@ func TestLoadVariants(t *testing.T) {
 				"local_mounts": {"./secrets": "/secrets"}
 			},
 			"opencode": {
-				"build_file": "Dockerfile.opencode"
+				"build_file": "Dockerfile.opencode",
+				"cuda": true
 			}
 		}
 	}`)
@@ -58,6 +59,9 @@ func TestLoadVariants(t *testing.T) {
 	}
 	if v.LocalMounts["./secrets"] != "/secrets" {
 		t.Errorf("unexpected local mounts: %v", v.LocalMounts)
+	}
+	if v.CUDA || !got["opencode"].CUDA {
+		t.Errorf("cuda should be off unless set: claude=%v opencode=%v", v.CUDA, got["opencode"].CUDA)
 	}
 }
 

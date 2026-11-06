@@ -50,7 +50,7 @@ func printExtraRunArgs(runtime container.Runtime, name string, args []models.Ext
 func printAppAccess(name string) {
 	fmt.Printf("\nWarning: '%s' is a graphical app. Every time you run it, dp gives it:\n\n", name)
 	fmt.Println("  - your Wayland display socket, so it can open windows (and see clipboard and input sent to them)")
-	fmt.Println("  - your GPU: /dev/dri, plus NVIDIA GPUs with CUDA when the NVIDIA Container Toolkit is installed")
+	fmt.Println("  - your GPU through /dev/dri (the NVIDIA GPU and CUDA only where a project's variant sets \"cuda\")")
 	fmt.Println("  - 1GB of shared memory")
 	fmt.Println("  - your time zone")
 	fmt.Println("  - on SELinux hosts, no SELinux confinement, which the display socket needs")

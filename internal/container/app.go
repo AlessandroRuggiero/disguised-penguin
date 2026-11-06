@@ -10,7 +10,8 @@ import (
 	"strings"
 )
 
-// AppHost is what dp needs to know about the host to run a graphical app.
+// AppHost is what dp needs to know about the host to run a graphical app or
+// give a CLI CUDA.
 // DetectAppHost fills it in; tests build it by hand.
 type AppHost struct {
 	OS             string
@@ -125,7 +126,7 @@ func hasNvidiaCDISpec(dirs []string) bool {
 }
 
 // AppRunArgs returns the runtime flags that let a graphical app open a window
-// on the host's Wayland session and use its GPU, CUDA included on NVIDIA.
+// on the host's Wayland session and render on its GPU (/dev/dri).
 // Warnings describe what is missing but doesn't stop the app from starting.
 func AppRunArgs(runtime Runtime, h AppHost) (args []string, warnings []string, err error) {
 	if h.OS != "linux" {
@@ -208,27 +209,35 @@ func AppRunArgs(runtime Runtime, h AppHost) (args []string, warnings []string, e
 		args = append(args, fmt.Sprintf("--memory=%dm", h.MemTotalKB*3/4/1024))
 	}
 
-	// Hardware-accelerated rendering (Mesa: Intel, AMD, nouveau).
+	// Hardware-accelerated rendering (Mesa: Intel, AMD, nouveau). The NVIDIA
+	// GPU is opt-in (CUDARunArgs): most apps don't need it, and on a hybrid
+	// laptop opening it wakes the dGPU and costs battery.
 	if h.HasDRI {
 		args = append(args, "--device", "/dev/dri")
 	}
+	return args, warnings, nil
+}
 
+// CUDARunArgs returns the runtime flags that give a CLI the host's NVIDIA
+// GPUs, CUDA included. Warnings say why it runs without them.
+func CUDARunArgs(runtime Runtime, h AppHost) (args []string, warnings []string) {
+	if !h.NVIDIA {
+		return nil, []string{"cuda is set but no NVIDIA driver is loaded, so it runs without CUDA"}
+	}
 	// NVIDIA's userspace driver must match the host kernel module, so the
 	// container toolkit injects the devices and libraries (CUDA included)
 	// rather than the image shipping its own.
-	if h.NVIDIA {
-		switch {
-		case runtime == RuntimePodman && h.NVIDIACDI:
-			args = append(args, "--device", "nvidia.com/gpu=all")
-		case runtime == RuntimeDocker && h.NVIDIAToolkit:
-			// --gpus only grants compute and utility by default; graphics is
-			// needed for the app to render on the GPU too.
-			args = append(args, "--gpus", "all", "-e", "NVIDIA_DRIVER_CAPABILITIES=all")
-		case runtime == RuntimePodman:
-			warnings = append(warnings, "an NVIDIA GPU is present but podman has no CDI spec for it, so the app runs without CUDA. Generate one with: sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml")
-		default:
-			warnings = append(warnings, "an NVIDIA GPU is present but the NVIDIA Container Toolkit is not installed, so the app runs without CUDA")
-		}
+	switch {
+	case runtime == RuntimePodman && h.NVIDIACDI:
+		args = append(args, "--device", "nvidia.com/gpu=all")
+	case runtime == RuntimeDocker && h.NVIDIAToolkit:
+		// --gpus only grants compute and utility by default; graphics lets an
+		// app render on the GPU too.
+		args = append(args, "--gpus", "all", "-e", "NVIDIA_DRIVER_CAPABILITIES=all")
+	case runtime == RuntimePodman:
+		warnings = append(warnings, "an NVIDIA GPU is present but podman has no CDI spec for it, so it runs without CUDA. Generate one with: sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml")
+	default:
+		warnings = append(warnings, "an NVIDIA GPU is present but the NVIDIA Container Toolkit is not installed, so it runs without CUDA")
 	}
-	return args, warnings, nil
+	return args, warnings
 }
