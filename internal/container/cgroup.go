@@ -2,6 +2,7 @@ package container
 
 import (
 	"fmt"
+	"os"
 	"strings"
 )
 
@@ -13,6 +14,14 @@ func AppCgroupFlags(cliName string) []string {
 		"--cgroup-parent=app-dp." + escapeUnitName(cliName) + ".slice",
 		"--annotation", "run.oci.systemd.subgroup=",
 	}
+}
+
+// SystemdCgroups reports whether the host runs systemd on the unified (v2)
+// cgroup hierarchy, which the slice in AppCgroupFlags needs.
+func SystemdCgroups() bool {
+	_, errV2 := os.Stat("/sys/fs/cgroup/cgroup.controllers")
+	_, errSystemd := os.Stat("/run/systemd/system")
+	return errV2 == nil && errSystemd == nil
 }
 
 // escapeUnitName escapes like systemd-escape: "-" would nest slices.

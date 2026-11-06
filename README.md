@@ -310,7 +310,8 @@ Use the `--monitor` flag *before* the CLI name to have the container show up as 
 dp --monitor <cli-name> [args...]
 ```
 
-The entry is named `dp.<cli-name>`. This only works with rootless Podman on Linux; with any other setup `dp` exits with an error.
+The entry is named `dp.<cli-name>`. This only works with rootless Podman on Linux; with any other setup `dp` exits with an error. [Graphical apps](#graphical-apps) get it by default wherever it works, without the flag. It costs nothing: it only changes where the container's cgroup sits, and the kernel accounts CPU and memory for it either way.
+
 ### Project Variants
 
 A variant is a project-local flavour of an installed CLI: an image built from the CLI's image plus whatever your project needs on top. It is declared in `.dp/variants.json`, and whenever you run that CLI from the project, `dp` uses the variant instead.
@@ -500,7 +501,16 @@ On every run, `dp` reads your session and adds:
 - **Shared memory**: `--shm-size=1g`, which Chromium/Electron and CUDA data loaders need.
 - **SELinux**: on SELinux hosts, `--security-opt label=disable`, because a confined container can't connect to the Wayland socket.
 
-The image's entrypoint must run the app as `PUID` (as dp images do), since the runtime dir is `/run/user/<your UID>`. Apps need Linux and a Wayland session: anywhere else, `dp` refuses to start them. These flags go before the package's `extra_run_args`, so a package can still override one (e.g. a larger `--shm-size`) or add its own hardening such as `--cap-drop=ALL`.
+Since an app can see your display, `dp` also locks it down:
+
+- **Capabilities**: `--cap-drop=ALL`, keeping only `CHOWN`, `DAC_OVERRIDE`, `SETUID` and `SETGID`, which the entrypoint needs to remap `penguin` to your UID/GID and drop to it.
+- **No privilege escalation**: `--security-opt no-new-privileges`, so a setuid binary (`su`, `sudo`, a buggy `pkexec`) can't take the app back to root.
+- **Process limit**: `--pids-limit=16384` (it counts threads), room for parallel builds on many-core machines, but a fork bomb still can't exhaust the host.
+- **Memory limit**: `--memory` set to 75% of your RAM, sized to the machine rather than the app. A leak gets OOM-killed inside the container while your compositor and other apps keep the rest.
+
+The image's entrypoint must run the app as `PUID` (as dp images do), since the runtime dir is `/run/user/<your UID>`. Apps need Linux and a Wayland session: anywhere else, `dp` refuses to start them. These flags go before the package's `extra_run_args`, so a package can override any of them: a larger `--shm-size`, `--pids-limit` or `--memory`, a `--cap-add` for a capability it needs, or `--security-opt no-new-privileges=false` if it really must escalate.
+
+With rootless Podman, apps also show up in your system monitor as `dp.<cli-name>`, as if run with [`--monitor`](#show-a-cli-in-the-system-monitor). With Docker, rootful Podman, or a host without systemd on cgroup v2, that is skipped quietly.
 
 `dp list` marks graphical apps, and `dp install`/`dp update` ask you to accept the access first, like extra run args.
 

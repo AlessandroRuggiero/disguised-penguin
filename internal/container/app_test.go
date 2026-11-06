@@ -153,6 +153,59 @@ func TestAppRunArgsErrors(t *testing.T) {
 	}
 }
 
+// Every app runs hardened, whatever the host or runtime.
+func TestAppRunArgsHardening(t *testing.T) {
+	for _, rt := range []Runtime{RuntimeDocker, RuntimePodman} {
+		args, _, err := AppRunArgs(rt, waylandHost(t))
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", rt, err)
+		}
+		for _, want := range [][]string{
+			{"--security-opt", "no-new-privileges"},
+			{"--cap-drop=ALL", "--cap-add=CHOWN", "--cap-add=DAC_OVERRIDE", "--cap-add=SETUID", "--cap-add=SETGID"},
+			{"--pids-limit=16384"},
+		} {
+			if !hasSeq(args, want...) {
+				t.Errorf("%s: missing %v in %v", rt, want, args)
+			}
+		}
+	}
+}
+
+// The memory cap is 75% of host RAM, and skipped when RAM is unknown.
+func TestAppRunArgsMemory(t *testing.T) {
+	h := waylandHost(t)
+	args, _, err := AppRunArgs(RuntimePodman, h)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, a := range args {
+		if strings.HasPrefix(a, "--memory") {
+			t.Errorf("unknown RAM should pass no limit, got %q", a)
+		}
+	}
+
+	h.MemTotalKB = 16 * 1024 * 1024 // 16 GiB
+	args, _, err = AppRunArgs(RuntimePodman, h)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !slices.Contains(args, "--memory=12288m") {
+		t.Errorf("want --memory=12288m in %v", args)
+	}
+}
+
+func TestMemTotalKB(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "meminfo")
+	if got := memTotalKB(path); got != 0 {
+		t.Errorf("missing file: got %d", got)
+	}
+	os.WriteFile(path, []byte("MemTotal:       16078176 kB\nMemFree:         7746964 kB\n"), 0644)
+	if got := memTotalKB(path); got != 16078176 {
+		t.Errorf("got %d, want 16078176", got)
+	}
+}
+
 func TestAppRunArgsHostFeatures(t *testing.T) {
 	h := waylandHost(t)
 	h.SELinux = true

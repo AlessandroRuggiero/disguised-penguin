@@ -234,10 +234,15 @@ var rootCmd = &cobra.Command{
 
 		// --monitor groups the container as an app for desktop system monitors.
 		// That relies on the user's systemd session, so rootless podman on Linux only.
-		if monitor {
-			if goruntime.GOOS != "linux" || runtime != container.RuntimePodman || os.Geteuid() == 0 {
-				return fmt.Errorf("--monitor is only supported with rootless podman on Linux")
-			}
+		// Graphical apps get it by default wherever it works, and skip it quietly
+		// elsewhere; only an explicit --monitor errors.
+		monitorSupported := goruntime.GOOS == "linux" && runtime == container.RuntimePodman && os.Geteuid() != 0
+		if monitor && !monitorSupported {
+			return fmt.Errorf("--monitor is only supported with rootless podman on Linux")
+		}
+		// The default also checks for systemd on cgroup v2, so a cosmetic
+		// feature can never stop an app from starting.
+		if monitor || (cli.App && monitorSupported && container.SystemdCgroups()) {
 			runtimeArgs = append(runtimeArgs, container.AppCgroupFlags(cli.Name)...)
 		}
 
@@ -356,8 +361,9 @@ var rootCmd = &cobra.Command{
 		}
 
 		// Graphical apps get the display and GPU, worked out from the host on
-		// every run. Before the extra run args, so a package can still
-		// override these (e.g. a bigger --shm-size).
+		// every run, plus default hardening. Before the extra run args, so a
+		// package can still override these (e.g. a bigger --shm-size, a
+		// --cap-add, no-new-privileges=false).
 		if cli.App {
 			appArgs, warnings, err := container.AppRunArgs(runtime, container.DetectAppHost(selinux))
 			if err != nil {

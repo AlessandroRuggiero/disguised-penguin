@@ -19,10 +19,11 @@ type AppHost struct {
 	WaylandDisplay string // host WAYLAND_DISPLAY: a socket name in RuntimeDir, or an absolute path
 	TimeZone       string // host TZ value, e.g. Europe/Stockholm; empty if unknown
 	SELinux        bool
-	HasDRI         bool // /dev/dri exists
-	NVIDIA         bool // the NVIDIA kernel driver is loaded
-	NVIDIACDI      bool // a CDI spec for nvidia.com/gpu exists (what podman uses)
-	NVIDIAToolkit  bool // the NVIDIA container toolkit is installed (what docker --gpus uses)
+	HasDRI         bool   // /dev/dri exists
+	NVIDIA         bool   // the NVIDIA kernel driver is loaded
+	NVIDIACDI      bool   // a CDI spec for nvidia.com/gpu exists (what podman uses)
+	NVIDIAToolkit  bool   // the NVIDIA container toolkit is installed (what docker --gpus uses)
+	MemTotalKB     uint64 // host RAM from /proc/meminfo; 0 if unknown
 }
 
 // Where the host's time zone is read from, when TZ isn't set.
@@ -30,6 +31,9 @@ var (
 	localtimePath = "/etc/localtime"
 	timezonePath  = "/etc/timezone" // Debian/Ubuntu
 )
+
+// Where the host's RAM is read from.
+var meminfoPath = "/proc/meminfo"
 
 // Where nvidia-ctk writes CDI specs (static, and the nvidia-cdi-refresh service).
 var cdiSpecDirs = []string{"/etc/cdi", "/var/run/cdi"}
@@ -51,6 +55,7 @@ func DetectAppHost(selinux bool) AppHost {
 		return h
 	}
 	h.TimeZone = detectTimeZone()
+	h.MemTotalKB = memTotalKB(meminfoPath)
 	_, err := os.Stat("/dev/dri")
 	h.HasDRI = err == nil
 	_, err = os.Stat("/proc/driver/nvidia/version")
@@ -65,6 +70,21 @@ func DetectAppHost(selinux bool) AppHost {
 		}
 	}
 	return h
+}
+
+// memTotalKB returns the MemTotal line of a meminfo file, in kB; 0 if unreadable.
+func memTotalKB(path string) uint64 {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if rest, ok := strings.CutPrefix(line, "MemTotal:"); ok {
+			kb, _ := strconv.ParseUint(strings.TrimSuffix(strings.TrimSpace(rest), " kB"), 10, 64)
+			return kb
+		}
+	}
+	return 0
 }
 
 // detectTimeZone returns the host's time zone as a TZ value: $TZ itself,
@@ -166,6 +186,27 @@ func AppRunArgs(runtime Runtime, h AppHost) (args []string, warnings []string, e
 
 	// Chromium/Electron and CUDA data loaders exhaust the 64MB default.
 	args = append(args, "--shm-size=1g")
+
+	// An app sees the display, so lock down what's left. Keep only the caps
+	// the entrypoint needs to remap penguin and drop to it, and block setuid
+	// escalation back to root. A package can still --cap-add what it needs or
+	// pass no-new-privileges=false: both runtimes let a later flag win.
+	args = append(args,
+		"--security-opt", "no-new-privileges",
+		"--cap-drop=ALL",
+		"--cap-add=CHOWN", "--cap-add=DAC_OVERRIDE", "--cap-add=SETUID", "--cap-add=SETGID",
+		// Counts threads, not processes. Room for parallel builds on many-core
+		// machines (podman's own default of 2048 is tight), yet a fork bomb
+		// still can't use up the host's threads (docker sets no limit at all).
+		"--pids-limit=16384",
+	)
+
+	// Not sized to the app but to the machine: a leak gets OOM-killed inside
+	// the container while the compositor and the rest of the session keep a
+	// quarter of the RAM.
+	if h.MemTotalKB > 0 {
+		args = append(args, fmt.Sprintf("--memory=%dm", h.MemTotalKB*3/4/1024))
+	}
 
 	// Hardware-accelerated rendering (Mesa: Intel, AMD, nouveau).
 	if h.HasDRI {
