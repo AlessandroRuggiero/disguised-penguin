@@ -22,6 +22,8 @@ type CLI struct {
 	ExtraRunArgs []ExtraRunArg
 	// Alias opts this CLI into an un-prefixed alias when alias_mode is "some".
 	Alias bool
+	// App marks a graphical app: dp passes it the display and the GPU.
+	App bool
 }
 
 type RemotePackage struct {
@@ -30,6 +32,7 @@ type RemotePackage struct {
 	ConfigMounts map[string]ConfigMount `json:"configmounts,omitempty"`
 	PortMappings map[string]string      `json:"portmappings,omitempty"`
 	ExtraRunArgs []ExtraRunArg          `json:"extra_run_args,omitempty"`
+	App          bool                   `json:"app,omitempty"`
 }
 
 type ExtraRunArg struct {

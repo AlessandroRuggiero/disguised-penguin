@@ -85,7 +85,7 @@ dp install <package-name>
 
 This pulls the container image and registers the CLI locally.
 
-If the package requests [extra run args](#extra-run-args), `dp` shows them with their descriptions and asks you to accept them before pulling anything. Use `--yes`/`-y` to skip the prompt.
+If the package is a [graphical app](#graphical-apps) or requests [extra run args](#extra-run-args), `dp` shows the access it needs and asks you to accept it before pulling anything. Use `--yes`/`-y` to skip the prompt.
 
 ### Container runtime (Docker/Podman)
 
@@ -140,6 +140,9 @@ Aliases only exist in interactive shells (not in scripts or other programs), and
 ```bash
 # This is not recommended for most users, use install instead to pull from a registry
 dp add <name> <image>
+
+# Mark it as a graphical app (see Graphical apps)
+dp add --app <name> <image>
 ```
 
 ### Remove a CLI
@@ -162,7 +165,7 @@ Updates every installed CLI. Failures for individual CLIs are reported but don't
 
 Add `--variants` to also rebuild the [project variants](#project-variants) of the CLIs that updated, in every project that has one.
 
-If a package's [extra run args](#extra-run-args) changed since you accepted them, `dp` shows the old and new lists and asks again; declining leaves that CLI untouched. `--yes`/`-y` accepts the changes without prompting.
+If a package's [extra run args](#extra-run-args) changed since you accepted them, or it became a [graphical app](#graphical-apps), `dp` shows what changed and asks again; declining leaves that CLI untouched. `--yes`/`-y` accepts the changes without prompting.
 
 ### Update `dp` itself
 
@@ -476,6 +479,30 @@ Continue with install? (y/N):
 `dp update` re-asks only when the list has changed since you accepted it. Pass `--yes`/`-y` to accept without prompting; in a script or CI, where nothing answers the prompt, `dp` refuses and tells you to use that flag rather than accepting silently.
 
 The name is a warning in itself: prefer `configmounts` and `portmappings`, and reach for `extra_run_args` only when nothing else expresses what the CLI needs. Each entry must start with a flag, so a manifest cannot smuggle in an image name or a command.
+
+### Graphical apps
+
+A package that opens windows (an editor, a desktop app, a CUDA viewer) sets `"app": true` instead of listing the display and GPU plumbing itself:
+
+```json
+"code": {
+  "container": "ghcr.io/example/code:main",
+  "app": true
+}
+```
+
+On every run, `dp` reads your session and adds:
+
+- **Display**: your Wayland socket (from `WAYLAND_DISPLAY`/`XDG_RUNTIME_DIR`), bound into a private tmpfs `XDG_RUNTIME_DIR` inside the container (owned by your UID/GID, mode `0700`). Only the compositor socket is shared, not the rest of `/run/user`. `XDG_SESSION_TYPE=wayland` tells GTK, Qt and Electron to use it.
+- **GPU**: `/dev/dri` when it exists, for Mesa (Intel, AMD, nouveau) rendering.
+- **NVIDIA/CUDA**: when the NVIDIA driver is loaded, every NVIDIA GPU with its matching driver libraries, through the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/): `--device nvidia.com/gpu=all` (CDI) on podman, `--gpus all` on docker. If the toolkit is missing (on podman: no CDI spec; generate one with `sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`), `dp` warns and runs the app without CUDA.
+- **Time zone**: `TZ` set to your zone (your own `TZ`, else the zone `/etc/localtime` links to, else `/etc/timezone`), so the app doesn't show UTC times. Skipped if it can't be found.
+- **Shared memory**: `--shm-size=1g`, which Chromium/Electron and CUDA data loaders need.
+- **SELinux**: on SELinux hosts, `--security-opt label=disable`, because a confined container can't connect to the Wayland socket.
+
+The image's entrypoint must run the app as `PUID` (as dp images do), since the runtime dir is `/run/user/<your UID>`. Apps need Linux and a Wayland session: anywhere else, `dp` refuses to start them. These flags go before the package's `extra_run_args`, so a package can still override one (e.g. a larger `--shm-size`) or add its own hardening such as `--cap-drop=ALL`.
+
+`dp list` marks graphical apps, and `dp install`/`dp update` ask you to accept the access first, like extra run args.
 
 ## Requirements
 - Platforms: Linux (amd64), macOS (amd64/arm64), and Windows (amd64)

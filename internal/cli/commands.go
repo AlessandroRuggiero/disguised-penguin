@@ -52,6 +52,14 @@ func printConfigMounts(mounts map[string]models.ConfigMount) {
 	printKeyValueSection("Config mounts", view)
 }
 
+func printAppSection(app bool) {
+	if app {
+		fmt.Println("Graphical app: yes (gets your display and GPU)")
+	} else {
+		fmt.Println("Graphical app: no")
+	}
+}
+
 func printExtraRunArgsSection(args []models.ExtraRunArg) {
 	fmt.Println("Extra run args:")
 	if len(args) == 0 {
@@ -72,7 +80,7 @@ var addCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		image := args[1]
-		if err := store.AddCLI(name, image); err != nil {
+		if err := store.AddCLI(name, image, addAppFlag); err != nil {
 			return fmt.Errorf("failed to insert CLI into db: %w", err)
 		}
 		fmt.Printf("Successfully added CLI '%s' mapped to image '%s'\n", name, image)
@@ -188,7 +196,7 @@ var installCmd = &cobra.Command{
 		// at the pull, which is the first step that actually needs one.
 		runtime, runtimeErr := container.ResolveRuntime(containerRuntimeFlag)
 
-		accepted, err := confirmExtraRunArgs(runtime, name, "Continue with install?", pkgToInstall.ExtraRunArgs, installYesFlag)
+		accepted, err := confirmPackageAccess(runtime, name, "Continue with install?", pkgToInstall.App, pkgToInstall.ExtraRunArgs, installYesFlag)
 		if err != nil {
 			return err
 		}
@@ -213,6 +221,7 @@ var installCmd = &cobra.Command{
 		printConfigMounts(pkgToInstall.ConfigMounts)
 		printKeyValueSection("Port mappings", pkgToInstall.PortMappings)
 		printExtraRunArgsSection(pkgToInstall.ExtraRunArgs)
+		printAppSection(pkgToInstall.App)
 
 		if err := store.InstallCLI(name, pkgToInstall); err != nil {
 			return fmt.Errorf("failed to insert CLI into db: %w", err)
@@ -232,7 +241,11 @@ var listCmd = &cobra.Command{
 		}
 		fmt.Println("Available CLIs:")
 		for _, c := range clis {
-			fmt.Printf("- %s (image: %s)\n", c.Name, c.Image)
+			app := ""
+			if c.App {
+				app = ", graphical app"
+			}
+			fmt.Printf("- %s (image: %s%s)\n", c.Name, c.Image, app)
 		}
 		return nil
 	},
@@ -385,18 +398,33 @@ func updateOne(name string, runtime container.Runtime, assumeYes bool) error {
 	if err != nil {
 		return err
 	}
-	if !extraRunArgsEqual(installed.ExtraRunArgs, pkgToUpdate.ExtraRunArgs) {
+	// Only gaining access needs a new yes; losing it is just reported.
+	argsChanged := !extraRunArgsEqual(installed.ExtraRunArgs, pkgToUpdate.ExtraRunArgs)
+	becameApp := pkgToUpdate.App && !installed.App
+	if installed.App && !pkgToUpdate.App {
+		fmt.Printf("\n'%s' is no longer a graphical app; dp will stop passing it your display and GPU.\n", name)
+	}
+	if becameApp {
+		fmt.Printf("\n'%s' is now a graphical app.\n", name)
+	}
+	if argsChanged {
 		fmt.Printf("\nExtra run args for '%s' changed since it was installed.\nCurrently accepted:\n", name)
 		printExtraRunArgsSection(installed.ExtraRunArgs)
 		if len(pkgToUpdate.ExtraRunArgs) == 0 {
 			fmt.Println("The package no longer requests any; they will be dropped.")
 		}
-		accepted, err := confirmExtraRunArgs(runtime, name, "Accept the new extra run args and continue with update?", pkgToUpdate.ExtraRunArgs, assumeYes)
+	}
+	if argsChanged || becameApp {
+		var newArgs []models.ExtraRunArg
+		if argsChanged {
+			newArgs = pkgToUpdate.ExtraRunArgs
+		}
+		accepted, err := confirmPackageAccess(runtime, name, "Accept the new access and continue with update?", becameApp, newArgs, assumeYes)
 		if err != nil {
 			return err
 		}
 		if !accepted {
-			return fmt.Errorf("declined the new extra run args for '%s'; it was left unchanged", name)
+			return fmt.Errorf("declined the new access requested by '%s'; it was left unchanged", name)
 		}
 	}
 
@@ -413,6 +441,7 @@ func updateOne(name string, runtime container.Runtime, assumeYes bool) error {
 	printConfigMounts(pkgToUpdate.ConfigMounts)
 	printKeyValueSection("Port mappings", pkgToUpdate.PortMappings)
 	printExtraRunArgsSection(pkgToUpdate.ExtraRunArgs)
+	printAppSection(pkgToUpdate.App)
 
 	if err := store.UpdateCLI(name, pkgToUpdate); err != nil {
 		return fmt.Errorf("failed to update CLI in db: %w", err)

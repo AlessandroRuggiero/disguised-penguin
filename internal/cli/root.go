@@ -35,6 +35,9 @@ var (
 	updateYesFlag  bool
 )
 
+// --app on add: mark a manually added CLI as a graphical app.
+var addAppFlag bool
+
 // --variants on update: also rebuild the tracked variants of updated CLIs.
 var updateVariantsFlag bool
 
@@ -352,6 +355,20 @@ var rootCmd = &cobra.Command{
 			runtimeArgs = append(runtimeArgs, "-p", fmt.Sprintf("%s:%s", hostPort, containerPort))
 		}
 
+		// Graphical apps get the display and GPU, worked out from the host on
+		// every run. Before the extra run args, so a package can still
+		// override these (e.g. a bigger --shm-size).
+		if cli.App {
+			appArgs, warnings, err := container.AppRunArgs(runtime, container.DetectAppHost(selinux))
+			if err != nil {
+				return fmt.Errorf("'%s' is a graphical app: %w", cli.Name, err)
+			}
+			for _, w := range warnings {
+				fmt.Fprintf(os.Stderr, "Warning: %s\n", w)
+			}
+			runtimeArgs = append(runtimeArgs, appArgs...)
+		}
+
 		// The package's own runtime options, accepted by the user at install
 		// time. They go after everything dp generates, so a package can
 		// override a flag we set (e.g. --network), and before the image, so no
@@ -434,6 +451,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&containerRuntimeFlag, "runtime", string(container.RuntimeAuto), "Container runtime to use: auto, docker, podman (also supports env DP_CONTAINER_RUNTIME)")
 
 	installCmd.Flags().BoolVarP(&installYesFlag, "yes", "y", false, "Accept the package's extra run args without prompting")
+	addCmd.Flags().BoolVar(&addAppFlag, "app", false, "Mark it as a graphical app: dp passes it your Wayland display and GPU")
 	updateCmd.Flags().BoolVarP(&updateYesFlag, "yes", "y", false, "Accept changes to the package's extra run args without prompting")
 	updateCmd.Flags().BoolVar(&updateVariantsFlag, "variants", false, "Also rebuild the variants of the updated CLIs, in every project")
 

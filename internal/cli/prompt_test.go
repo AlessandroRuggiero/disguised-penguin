@@ -54,9 +54,9 @@ func TestConfirmNoInput(t *testing.T) {
 	}
 }
 
-func TestConfirmExtraRunArgsNoArgs(t *testing.T) {
+func TestConfirmPackageAccessNoArgs(t *testing.T) {
 	// No args means nothing to warn about, so it must not touch stdin.
-	ok, err := confirmExtraRunArgs(container.RuntimeDocker, "tool", "continue?", nil, false)
+	ok, err := confirmPackageAccess(container.RuntimeDocker, "tool", "continue?", false, nil, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -65,9 +65,9 @@ func TestConfirmExtraRunArgsNoArgs(t *testing.T) {
 	}
 }
 
-func TestConfirmExtraRunArgsAssumeYes(t *testing.T) {
+func TestConfirmPackageAccessAssumeYes(t *testing.T) {
 	args := []models.ExtraRunArg{{Args: []string{"--privileged"}, Description: "why"}}
-	ok, err := confirmExtraRunArgs(container.RuntimeDocker, "tool", "continue?", args, true)
+	ok, err := confirmPackageAccess(container.RuntimeDocker, "tool", "continue?", false, args, true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -77,10 +77,10 @@ func TestConfirmExtraRunArgsAssumeYes(t *testing.T) {
 }
 
 // Nothing on stdin must be an error pointing at --yes, not a silent accept.
-func TestConfirmExtraRunArgsNoInput(t *testing.T) {
+func TestConfirmPackageAccessNoInput(t *testing.T) {
 	withStdin(t, "")
 	args := []models.ExtraRunArg{{Args: []string{"--privileged"}, Description: "why"}}
-	ok, err := confirmExtraRunArgs(container.RuntimeDocker, "tool", "continue?", args, false)
+	ok, err := confirmPackageAccess(container.RuntimeDocker, "tool", "continue?", false, args, false)
 	if err == nil {
 		t.Fatal("expected an error when nothing answers the prompt")
 	}
@@ -89,6 +89,23 @@ func TestConfirmExtraRunArgsNoInput(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--yes") {
 		t.Errorf("error should point at --yes, got: %v", err)
+	}
+}
+
+// Being an app is access the user must accept, even with no extra args.
+func TestConfirmPackageAccessAppOnly(t *testing.T) {
+	withStdin(t, "n\n")
+	ok, err := confirmPackageAccess(container.RuntimePodman, "tool", "continue?", true, nil, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ok {
+		t.Error("expected the app to be refused")
+	}
+
+	withStdin(t, "")
+	if _, err := confirmPackageAccess(container.RuntimePodman, "tool", "continue?", true, nil, false); err == nil {
+		t.Error("expected an error when nothing answers the prompt")
 	}
 }
 

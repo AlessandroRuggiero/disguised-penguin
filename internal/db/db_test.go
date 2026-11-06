@@ -154,7 +154,7 @@ func extraRunArgsColumn(t *testing.T, store *Store, name string) sql.NullString 
 func TestAddCLIHasNoExtraRunArgs(t *testing.T) {
 	store := newTestStore(t)
 
-	if err := store.AddCLI("manual", "ghcr.io/foo/manual:latest"); err != nil {
+	if err := store.AddCLI("manual", "ghcr.io/foo/manual:latest", false); err != nil {
 		t.Fatalf("AddCLI: %v", err)
 	}
 	cli, err := store.GetCliByName("manual")
@@ -270,7 +270,7 @@ func TestSettingsDefaultAndRoundTrip(t *testing.T) {
 func TestSetCLIAlias(t *testing.T) {
 	store := newTestStore(t)
 
-	if err := store.AddCLI("tool", "img"); err != nil {
+	if err := store.AddCLI("tool", "img", false); err != nil {
 		t.Fatalf("AddCLI: %v", err)
 	}
 	aliasOf := func() bool {
@@ -364,5 +364,42 @@ func TestNeverRunVariantHasNoLastUse(t *testing.T) {
 	}
 	if !variants[0].LastActivity().Equal(t0) {
 		t.Errorf("LastActivity should fall back to the build time, got %v", variants[0].LastActivity())
+	}
+}
+
+func TestAppFlagRoundTrips(t *testing.T) {
+	store := newTestStore(t)
+
+	if err := store.InstallCLI("gui", &models.RemotePackage{Image: "img", App: true}); err != nil {
+		t.Fatalf("InstallCLI: %v", err)
+	}
+	if err := store.AddCLI("manual", "img", true); err != nil {
+		t.Fatalf("AddCLI: %v", err)
+	}
+	if err := store.InstallCLI("plain", &models.RemotePackage{Image: "img"}); err != nil {
+		t.Fatalf("InstallCLI: %v", err)
+	}
+	for name, want := range map[string]bool{"gui": true, "manual": true, "plain": false} {
+		cli, err := store.GetCliByName(name)
+		if err != nil {
+			t.Fatalf("GetCliByName(%s): %v", name, err)
+		}
+		if cli.App != want {
+			t.Errorf("%s: App = %v, want %v", name, cli.App, want)
+		}
+	}
+
+	// An update to a package that dropped the flag clears it.
+	if err := store.UpdateCLI("gui", &models.RemotePackage{Image: "img"}); err != nil {
+		t.Fatalf("UpdateCLI: %v", err)
+	}
+	clis, err := store.ListCLIs()
+	if err != nil {
+		t.Fatalf("ListCLIs: %v", err)
+	}
+	for _, c := range clis {
+		if want := c.Name == "manual"; c.App != want {
+			t.Errorf("ListCLIs %s: App = %v, want %v", c.Name, c.App, want)
+		}
 	}
 }
